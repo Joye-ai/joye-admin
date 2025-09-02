@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+
+# Husky v9+ simple hook. Exits non-zero on failure to block commit.
+npx --yes lint-staged
