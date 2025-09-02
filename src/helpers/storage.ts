@@ -91,7 +91,7 @@ export const storageHelpers = {
    * Get theme
    */
   getTheme: (): "light" | "dark" | "system" => {
-    return storageHelpers.get(STORAGE_KEYS.THEME, "system");
+    return storageHelpers.get(STORAGE_KEYS.THEME, "system") || "system";
   },
 
   /**

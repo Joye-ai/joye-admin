@@ -5,13 +5,13 @@ export const ROUTES = {
   LOGIN: "/login",
 
   // App Routes (used)
-  DASHBOARD: "/dashboard",
+  DASHBOARD: "/",
   PROMPTS: "/prompts",
   USERS: "/users",
 } as const;
 
 // Route Groups
 export const ROUTE_GROUPS = {
-  PUBLIC: [ROUTES.HOME, ROUTES.LOGIN],
-  PROTECTED: [ROUTES.DASHBOARD, ROUTES.USERS, ROUTES.PROMPTS],
+  PUBLIC: [ROUTES.LOGIN],
+  PROTECTED: [ROUTES.HOME, ROUTES.USERS, ROUTES.PROMPTS],
 } as const;

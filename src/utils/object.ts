@@ -179,11 +179,13 @@ export const merge = <T extends Record<string, any>>(target: T, ...sources: Part
 
   if (isObject(target) && isObject(source)) {
     for (const key in source) {
-      if (isObject(source[key])) {
-        if (!target[key]) Object.assign(target, { [key]: {} });
-        merge(target[key], source[key]);
-      } else {
-        Object.assign(target, { [key]: source[key] });
+      if (source[key] !== undefined) {
+        if (isObject(source[key])) {
+          if (!target[key]) Object.assign(target, { [key]: {} });
+          merge(target[key], source[key]);
+        } else {
+          Object.assign(target, { [key]: source[key] });
+        }
       }
     }
   }

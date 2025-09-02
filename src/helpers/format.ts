@@ -32,7 +32,7 @@ export const formatHelpers = {
   /**
    * Format date
    */
-  date: (date: Date | string, format = DATE_FORMATS.DISPLAY): string => {
+  date: (date: Date | string, format: string = DATE_FORMATS.DISPLAY): string => {
     const dateObj = typeof date === "string" ? new Date(date) : date;
 
     if (isNaN(dateObj.getTime())) return "Invalid Date";

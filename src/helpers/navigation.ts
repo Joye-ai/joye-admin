@@ -3,12 +3,28 @@ import { useRouter } from "next/navigation";
 import { ROUTES } from "@/constants";
 
 /**
+ * Generic navigation function - pass only the route
+ * @param router - Next.js router instance
+ * @param route - Route path to navigate to
+ */
+export const navigateTo = (router: any, route: string): void => {
+  router.push(route);
+};
+
+/**
  * Navigation helper functions
  */
 
 export const navigationHelpers = {
   /**
-   * Navigate to a route
+   * Generic navigation function - pass only the route
+   */
+  goTo: (router: any, route: string): void => {
+    router.push(route);
+  },
+
+  /**
+   * Navigate to a route (legacy function)
    */
   navigate: (router: any, path: string): void => {
     router.push(path);
@@ -19,55 +35,6 @@ export const navigationHelpers = {
    */
   goBack: (router: any): void => {
     router.back();
-  },
-
-  /**
-   * Navigate to home
-   */
-  goHome: (router: any): void => {
-    router.push(ROUTES.HOME);
-  },
-
-  /**
-   * Navigate to dashboard
-   */
-  goToDashboard: (router: any): void => {
-    router.push(ROUTES.DASHBOARD);
-  },
-
-  /**
-   * Navigate to login
-   */
-  goToLogin: (router: any): void => {
-    router.push(ROUTES.LOGIN);
-  },
-
-  /**
-   * Navigate to users
-   */
-  goToUsers: (router: any): void => {
-    router.push(ROUTES.USERS);
-  },
-
-  /**
-   * Navigate to user create
-   */
-  goToUserCreate: (router: any): void => {
-    router.push(ROUTES.USER_CREATE);
-  },
-
-  /**
-   * Navigate to user edit
-   */
-  goToUserEdit: (router: any, userId: string): void => {
-    router.push(`${ROUTES.USER_EDIT}/${userId}`);
-  },
-
-  /**
-   * Navigate to settings
-   */
-  goToSettings: (router: any): void => {
-    router.push(ROUTES.SETTINGS);
   },
 
   /**
