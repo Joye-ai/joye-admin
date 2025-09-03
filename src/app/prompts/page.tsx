@@ -169,6 +169,9 @@ export default function PromptsPage() {
                       Category
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Model
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Tokens
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -179,7 +182,7 @@ export default function PromptsPage() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {rows.length === 0 && !loading && (
                     <tr>
-                      <td colSpan={3} className="px-6 py-6 text-center text-sm text-gray-500">
+                      <td colSpan={4} className="px-6 py-6 text-center text-sm text-gray-500">
                         No data
                       </td>
                     </tr>
@@ -188,6 +191,9 @@ export default function PromptsPage() {
                     <tr key={row.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {row.category}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {row.model || "N/A"}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {Number(row.tokens) || 0}
@@ -216,12 +222,21 @@ export default function PromptsPage() {
               <h3 className="text-lg font-semibold text-gray-900">Edit Prompt</h3>
 
               {/* Readonly Fields */}
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="flex flex-col">
                   <label className="text-sm font-medium text-gray-700 mb-1">Category</label>
                   <input
                     type="text"
                     value={editRow.category}
+                    readOnly
+                    className="h-10 rounded-md border border-gray-300 px-3 text-sm bg-gray-50 text-gray-600 cursor-not-allowed"
+                  />
+                </div>
+                <div className="flex flex-col">
+                  <label className="text-sm font-medium text-gray-700 mb-1">Model</label>
+                  <input
+                    type="text"
+                    value={editRow.model || "N/A"}
                     readOnly
                     className="h-10 rounded-md border border-gray-300 px-3 text-sm bg-gray-50 text-gray-600 cursor-not-allowed"
                   />
