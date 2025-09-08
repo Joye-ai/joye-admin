@@ -1,4 +1,4 @@
-import { API_BASE_URL, MASTER_API_BASE_URL } from "@/constants";
+import { API_BASE_URL, SERVER_API_BASE_URL } from "@/constants";
 
 import { authHelpers } from "./auth";
 
@@ -8,8 +8,10 @@ import { authHelpers } from "./auth";
 const makeApiRequest = async <T = unknown>(
   endpoint: string,
   options: RequestInit = {},
+  useNextServer: boolean = false,
 ): Promise<T> => {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const baseUrl = useNextServer ? API_BASE_URL : SERVER_API_BASE_URL;
+  const url = `${baseUrl}${endpoint}`;
   const authHeaders = authHelpers.getAuthHeader();
 
   const config: RequestInit = {
@@ -39,11 +41,13 @@ const makeApiRequest = async <T = unknown>(
  * Generic GET function
  * @param endpoint - API endpoint (without base URL)
  * @param params - Query parameters (optional)
+ * @param useNextServer - Flag to use Next server base URL instead of Master API base URL
  * @returns Promise with response data
  */
 export const get = <T = unknown>(
   endpoint: string,
   params?: Record<string, unknown>,
+  useNextServer: boolean = false,
 ): Promise<T> => {
   const url = params
     ? `${endpoint}?${new URLSearchParams(
@@ -53,55 +57,83 @@ export const get = <T = unknown>(
         }, {}),
       )}`
     : endpoint;
-  return makeApiRequest<T>(url, { method: "GET" });
+  return makeApiRequest<T>(url, { method: "GET" }, useNextServer);
 };
 
 /**
  * Generic POST function
  * @param endpoint - API endpoint (without base URL)
  * @param payload - Request body data (optional)
+ * @param useNextServer - Flag to use Next server base URL instead of Master API base URL
  * @returns Promise with response data
  */
-export const post = <T = unknown>(endpoint: string, payload?: unknown): Promise<T> => {
-  return makeApiRequest<T>(endpoint, {
-    method: "POST",
-    body: payload ? JSON.stringify(payload) : undefined,
-  });
+export const post = <T = unknown>(
+  endpoint: string,
+  payload?: unknown,
+  useNextServer: boolean = false,
+): Promise<T> => {
+  return makeApiRequest<T>(
+    endpoint,
+    {
+      method: "POST",
+      body: payload ? JSON.stringify(payload) : undefined,
+    },
+    useNextServer,
+  );
 };
 
 /**
  * Generic PUT function
  * @param endpoint - API endpoint (without base URL)
  * @param payload - Request body data (optional)
+ * @param useNextServer - Flag to use Next server base URL instead of Master API base URL
  * @returns Promise with response data
  */
-export const put = <T = unknown>(endpoint: string, payload?: unknown): Promise<T> => {
-  return makeApiRequest<T>(endpoint, {
-    method: "PUT",
-    body: payload ? JSON.stringify(payload) : undefined,
-  });
+export const put = <T = unknown>(
+  endpoint: string,
+  payload?: unknown,
+  useNextServer: boolean = false,
+): Promise<T> => {
+  return makeApiRequest<T>(
+    endpoint,
+    {
+      method: "PUT",
+      body: payload ? JSON.stringify(payload) : undefined,
+    },
+    useNextServer,
+  );
 };
 
 /**
  * Generic PATCH function
  * @param endpoint - API endpoint (without base URL)
  * @param payload - Request body data (optional)
+ * @param useNextServer - Flag to use Next server base URL instead of Master API base URL
  * @returns Promise with response data
  */
-export const patch = <T = unknown>(endpoint: string, payload?: unknown): Promise<T> => {
-  return makeApiRequest<T>(endpoint, {
-    method: "PATCH",
-    body: payload ? JSON.stringify(payload) : undefined,
-  });
+export const patch = <T = unknown>(
+  endpoint: string,
+  payload?: unknown,
+  useNextServer: boolean = false,
+): Promise<T> => {
+  return makeApiRequest<T>(
+    endpoint,
+    {
+      method: "PATCH",
+      body: payload ? JSON.stringify(payload) : undefined,
+    },
+    useNextServer,
+  );
 };
 
 /**
  * Generic DELETE function
  * @param endpoint - API endpoint (without base URL)
+ * @param useNextServer - Flag to use Next server base URL instead of Master API base URL
  * @returns Promise with response data
  */
-export const del = <T = unknown>(endpoint: string): Promise<T> => {
-  return makeApiRequest<T>(endpoint, { method: "DELETE" });
+export const del = <T = unknown>(endpoint: string, useNextServer: boolean = false): Promise<T> => {
+  return makeApiRequest<T>(endpoint, { method: "DELETE" }, useNextServer);
 };
 
 /**
@@ -109,12 +141,14 @@ export const del = <T = unknown>(endpoint: string): Promise<T> => {
  * @param endpoint - API endpoint (without base URL)
  * @param file - File to upload
  * @param onProgress - Progress callback (optional)
+ * @param useNextServer - Flag to use Next server base URL instead of Master API base URL
  * @returns Promise with response data
  */
 export const upload = async <T = unknown>(
   endpoint: string,
   file: File,
   onProgress?: (progress: number) => void,
+  useNextServer: boolean = false,
 ): Promise<T> => {
   const formData = new FormData();
   formData.append("file", file);
@@ -149,7 +183,8 @@ export const upload = async <T = unknown>(
       reject(new Error("Upload failed"));
     });
 
-    xhr.open("POST", `${API_BASE_URL}${endpoint}`);
+    const baseUrl = useNextServer ? API_BASE_URL : SERVER_API_BASE_URL;
+    xhr.open("POST", `${baseUrl}${endpoint}`);
 
     // Set auth header
     const token = authHelpers.getToken();
@@ -300,7 +335,7 @@ const getMockMasterData = (model: string, category: string) => {
  * @returns Master API client with enhanced functionality
  */
 const createMasterApiClient = () => {
-  const baseClient = createApiClient(MASTER_API_BASE_URL, {
+  const baseClient = createApiClient(SERVER_API_BASE_URL, {
     "Ocp-Apim-Subscription-Key":
       process.env.NEXT_PUBLIC_APIM_SUBSCRIPTION_KEY || "{{apim-subscription-key}}",
     "X-Azure-FDID": process.env.NEXT_PUBLIC_FRONTDOOR_ID || "{{frontdoor-id-jy-test}}",
@@ -310,7 +345,7 @@ const createMasterApiClient = () => {
     ...baseClient,
     get: async <T = unknown>(endpoint: string, params?: Record<string, unknown>): Promise<T> => {
       // Check if we should use mock data
-      const USE_MOCK_DATA = process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true" || true; // Default to true for now
+      const USE_MOCK_DATA = process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true";
 
       if (USE_MOCK_DATA && endpoint === "/master/data") {
         // Simulate API delay

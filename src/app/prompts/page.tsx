@@ -4,9 +4,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Layout } from "@/components/layout";
-import { Button, Card, CardHeader, CardTitle, CardContent, Loader } from "@/components/ui";
-import { ROUTES } from "@/constants";
-import { post, put } from "@/helpers/api";
+import { Card, CardHeader, CardTitle, CardContent, Loader } from "@/components/ui";
+import { API_ENDPOINTS, ROUTES } from "@/constants";
+import { post, patch } from "@/helpers/api";
 import { useAppSelector } from "@/store";
 
 type PromptRow = {
@@ -50,7 +50,7 @@ export default function PromptsPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await post<{ data: PromptRow[] }>("admin/prompts-data", {
+      const response = await post<{ data: PromptRow[] }>(API_ENDPOINTS.PROMPTS.PROMPTS_DATA, {
         type: category,
       });
       setRows(response.data);
@@ -62,10 +62,11 @@ export default function PromptsPage() {
       setLoading(false);
     }
   };
+
   const saveEdit = async () => {
     if (!editRow) return;
     try {
-      const response = await put("admin/prompt-update", {
+      const response = await patch(API_ENDPOINTS.PROMPTS.PROMPT_UPDATE, {
         _id: editRow._id,
         prompt: editContent,
       });
@@ -75,8 +76,11 @@ export default function PromptsPage() {
       if (response) {
         closeEdit();
       }
-    } catch (error) {}
+    } catch (error) {
+      console.log("SaveEdit Error: ", error);
+    }
   };
+
   useEffect(() => {
     if (!isAuthenticated) return;
     fetchData(selectedCategory);
@@ -91,6 +95,7 @@ export default function PromptsPage() {
     setEditRow(null);
     setEditContent("");
   };
+
   return (
     <Layout
       title="Prompts"
@@ -125,7 +130,7 @@ export default function PromptsPage() {
     >
       <div className="space-y-6">
         {/* Mock Data Indicator */}
-        {(process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true" || true) && (
+        {process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true" && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
             <div className="flex items-center">
               <div className="flex-shrink-0">

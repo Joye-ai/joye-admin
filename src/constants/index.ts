@@ -1,7 +1,7 @@
 // API Constants
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001/api";
-export const MASTER_API_BASE_URL =
-  process.env.NEXT_PUBLIC_MASTER_API_BASE_URL || "http://localhost:8081";
+export const SERVER_API_BASE_URL =
+  process.env.NEXT_PUBLIC_SERVER_API_BASE_URL || "http://localhost:8081";
 export const API_ENDPOINTS = {
   AUTH: {
     LOGIN: "/auth/login",
@@ -18,6 +18,10 @@ export const API_ENDPOINTS = {
   DASHBOARD: {
     STATS: "/dashboard/stats",
     ANALYTICS: "/dashboard/analytics",
+  },
+  PROMPTS: {
+    PROMPTS_DATA: "/admin/prompts-data",
+    PROMPT_UPDATE: "/admin/prompt-update",
   },
 } as const;
 
