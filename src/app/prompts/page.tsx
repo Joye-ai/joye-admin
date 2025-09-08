@@ -4,17 +4,17 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Layout } from "@/components/layout";
-import { Button, Card, CardHeader, CardTitle, CardContent, Loader } from "@/components/ui";
-import { ROUTES } from "@/constants";
-import { masterApi } from "@/helpers/api";
+import { Card, CardHeader, CardTitle, CardContent, Loader } from "@/components/ui";
+import { API_ENDPOINTS, ROUTES } from "@/constants";
+import { post, patch } from "@/helpers/api";
 import { useAppSelector } from "@/store";
 
 type PromptRow = {
-  id: string | number;
+  _id: string | number;
   model: string;
-  category: string;
+  type: string;
   tokens: number;
-  content?: string;
+  prompt?: string;
 };
 
 const CATEGORY_OPTIONS = [
@@ -50,12 +50,10 @@ export default function PromptsPage() {
     setLoading(true);
     setError(null);
     try {
-      // API call with category as parameter (using default model)
-      const data: PromptRow[] = await masterApi.get("/master/data", {
-        model: "claude-sonnet-4-20250514", // Default model
-        category,
+      const response = await post<{ data: PromptRow[] }>(API_ENDPOINTS.PROMPTS.PROMPTS_DATA, {
+        type: category,
       });
-      setRows(data);
+      setRows(response.data);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to fetch data";
       setError(message);
@@ -65,7 +63,24 @@ export default function PromptsPage() {
     }
   };
 
-  // Fetch on category change
+  const saveEdit = async () => {
+    if (!editRow) return;
+    try {
+      const response = await patch(API_ENDPOINTS.PROMPTS.PROMPT_UPDATE, {
+        _id: editRow._id,
+        prompt: editContent,
+      });
+      setRows((prev) =>
+        prev.map((r) => (r._id === editRow._id ? { ...r, prompt: editContent } : r)),
+      );
+      if (response) {
+        closeEdit();
+      }
+    } catch (error) {
+      console.log("SaveEdit Error: ", error);
+    }
+  };
+
   useEffect(() => {
     if (!isAuthenticated) return;
     fetchData(selectedCategory);
@@ -73,19 +88,12 @@ export default function PromptsPage() {
 
   const openEdit = (row: PromptRow) => {
     setEditRow(row);
-    setEditContent(row.content ?? "");
+    setEditContent(row.prompt ?? "");
   };
 
   const closeEdit = () => {
     setEditRow(null);
     setEditContent("");
-  };
-
-  const saveEdit = () => {
-    if (!editRow) return;
-    // Update local state only (wire to real API later)
-    setRows((prev) => prev.map((r) => (r.id === editRow.id ? { ...r, content: editContent } : r)));
-    closeEdit();
   };
 
   return (
@@ -122,7 +130,7 @@ export default function PromptsPage() {
     >
       <div className="space-y-6">
         {/* Mock Data Indicator */}
-        {(process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true" || true) && (
+        {process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true" && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
             <div className="flex items-center">
               <div className="flex-shrink-0">
@@ -224,16 +232,16 @@ export default function PromptsPage() {
                     </tr>
                   )}
                   {!loading &&
-                    rows.map((row) => (
-                      <tr key={row.id} className="hover:bg-gray-50">
+                    rows?.map((row) => (
+                      <tr key={row?._id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {row.category}
+                          {row?.type}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {row.model || "N/A"}
+                          {row?.model || "N/A"}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {Number(row.tokens) || 0}
+                          {Number(row?.tokens) || 0}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                           <button
@@ -264,7 +272,7 @@ export default function PromptsPage() {
                   <label className="text-sm font-medium text-gray-700 mb-1">Category</label>
                   <input
                     type="text"
-                    value={editRow.category}
+                    value={editRow.type}
                     readOnly
                     className="h-10 rounded-md border border-gray-300 px-3 text-sm bg-gray-50 text-gray-600 cursor-not-allowed"
                   />
