@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 
 export interface AlertProps {
   /**
@@ -25,6 +25,11 @@ export interface AlertProps {
    * Whether to show an icon
    */
   showIcon?: boolean;
+  /**
+   * Auto-dismiss duration in seconds. If provided, the alert will automatically dismiss after this duration.
+   * Set to 0 or undefined to disable auto-dismissal.
+   */
+  duration?: number;
 }
 
 const variantStyles = {
@@ -100,8 +105,32 @@ export const Alert: React.FC<AlertProps> = ({
   onDismiss,
   className = "",
   showIcon = true,
+  duration,
 }) => {
+  const [isVisible, setIsVisible] = useState(true);
   const styles = variantStyles[variant];
+
+  // Handle auto-dismissal
+  useEffect(() => {
+    if (duration && duration > 0) {
+      const timer = setTimeout(() => {
+        setIsVisible(false);
+        onDismiss?.();
+      }, duration * 1000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [duration, onDismiss]);
+
+  // Handle manual dismissal
+  const handleDismiss = () => {
+    setIsVisible(false);
+    onDismiss?.();
+  };
+
+  if (!isVisible) {
+    return null;
+  }
 
   return (
     <div className={`border rounded-md p-3 ${styles.container} ${className}`}>
@@ -116,10 +145,10 @@ export const Alert: React.FC<AlertProps> = ({
         <div className={`${showIcon ? "ml-3" : ""} flex-1`}>
           <div className={`text-sm ${styles.text}`}>{children}</div>
         </div>
-        {dismissible && onDismiss && (
+        {(dismissible || duration) && (
           <div className="ml-auto pl-3">
             <button
-              onClick={onDismiss}
+              onClick={handleDismiss}
               className={`${styles.dismiss} focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-current rounded-sm`}
               aria-label="Dismiss alert"
             >

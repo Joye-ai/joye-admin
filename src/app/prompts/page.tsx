@@ -77,10 +77,6 @@ export default function PromptsPage() {
       if (response) {
         setSuccessMessage("Prompt saved successfully!");
         closeEdit();
-        // Auto-hide success message after 3 seconds
-        setTimeout(() => {
-          setSuccessMessage(null);
-        }, 3000);
       }
     } catch (error) {
       console.log("SaveEdit Error: ", error);
@@ -137,7 +133,7 @@ export default function PromptsPage() {
       <div className="space-y-6">
         {/* Success Message */}
         {successMessage && (
-          <Alert variant="success" dismissible onDismiss={() => setSuccessMessage(null)}>
+          <Alert variant="success" duration={3} onDismiss={() => setSuccessMessage(null)}>
             {successMessage}
           </Alert>
         )}
