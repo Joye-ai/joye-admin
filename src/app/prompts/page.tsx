@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Layout } from "@/components/layout";
-import { Card, CardHeader, CardTitle, CardContent, Loader } from "@/components/ui";
+import { Card, CardHeader, CardTitle, CardContent, Loader, Alert } from "@/components/ui";
 import { API_ENDPOINTS, ROUTES } from "@/constants";
 import { post, patch } from "@/helpers/api";
 import { useAppSelector } from "@/store";
@@ -41,6 +41,7 @@ export default function PromptsPage() {
   const [rows, setRows] = useState<PromptRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Edit modal state
   const [editRow, setEditRow] = useState<PromptRow | null>(null);
@@ -74,7 +75,12 @@ export default function PromptsPage() {
         prev.map((r) => (r._id === editRow._id ? { ...r, prompt: editContent } : r)),
       );
       if (response) {
+        setSuccessMessage("Prompt saved successfully!");
         closeEdit();
+        // Auto-hide success message after 3 seconds
+        setTimeout(() => {
+          setSuccessMessage(null);
+        }, 3000);
       }
     } catch (error) {
       console.log("SaveEdit Error: ", error);
@@ -129,30 +135,20 @@ export default function PromptsPage() {
       }
     >
       <div className="space-y-6">
+        {/* Success Message */}
+        {successMessage && (
+          <Alert variant="success" dismissible onDismiss={() => setSuccessMessage(null)}>
+            {successMessage}
+          </Alert>
+        )}
+
         {/* Mock Data Indicator */}
         {process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true" && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path
-                    fillRule="evenodd"
-                    d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <p className="text-sm text-yellow-700">
-                  <strong>Mock Data Mode:</strong> Using sample data instead of real API calls. Set{" "}
-                  <code className="bg-yellow-100 px-1 rounded">
-                    NEXT_PUBLIC_USE_MOCK_DATA=false
-                  </code>{" "}
-                  to use real API.
-                </p>
-              </div>
-            </div>
-          </div>
+          <Alert variant="warning">
+            <strong>Mock Data Mode:</strong> Using sample data instead of real API calls. Set{" "}
+            <code className="bg-yellow-100 px-1 rounded">NEXT_PUBLIC_USE_MOCK_DATA=false</code> to
+            use real API.
+          </Alert>
         )}
 
         {/* Filters */}
@@ -182,7 +178,11 @@ export default function PromptsPage() {
                 </select>
               </div>
             </div>
-            {error && <div className="mt-2 text-sm text-red-600">{error}</div>}
+            {error && (
+              <div className="mt-2">
+                <Alert variant="error">{error}</Alert>
+              </div>
+            )}
           </CardContent>
         </Card>
 
