@@ -53,6 +53,20 @@ const navigationItems: NavItem[] = [
     ),
   },
   {
+    label: "Chat",
+    href: ROUTES.CHAT,
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M7 8h10M7 12h4m-2 8a9 9 0 110-18 9 9 0 010 18z"
+        />
+      </svg>
+    ),
+  },
+  {
     label: "Users",
     href: ROUTES.USERS,
     icon: (

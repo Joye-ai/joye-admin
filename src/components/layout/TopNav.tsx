@@ -19,6 +19,7 @@ export function TopNav() {
   const nav = [
     { label: "Dashboard", href: ROUTES.DASHBOARD },
     { label: "Prompts", href: ROUTES.PROMPTS },
+    { label: "Chat", href: ROUTES.CHAT },
     { label: "Users", href: ROUTES.USERS },
   ];
 
