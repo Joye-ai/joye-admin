@@ -8,6 +8,7 @@ export const ROUTES = {
   DASHBOARD: "/",
   PROMPTS: "/prompts",
   USERS: "/users",
+  CHAT: "/chat",
 } as const;
 
 // Route Groups
