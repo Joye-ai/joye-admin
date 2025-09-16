@@ -8,10 +8,11 @@ export const ROUTES = {
   DASHBOARD: "/",
   PROMPTS: "/prompts",
   USERS: "/users",
+  CHATS: "/chats",
 } as const;
 
 // Route Groups
 export const ROUTE_GROUPS = {
   PUBLIC: [ROUTES.LOGIN],
-  PROTECTED: [ROUTES.HOME, ROUTES.USERS, ROUTES.PROMPTS],
+  PROTECTED: [ROUTES.HOME, ROUTES.USERS, ROUTES.PROMPTS, ROUTES.CHATS],
 } as const;
