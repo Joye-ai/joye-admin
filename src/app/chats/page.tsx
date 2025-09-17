@@ -14,6 +14,7 @@ import {
   DateRangePicker,
 } from "@/components/ui";
 import { ROUTES } from "@/constants";
+import { post, patch, get } from "@/helpers/api";
 import { useAppSelector } from "@/store";
 
 interface FilterState {
@@ -56,6 +57,11 @@ export default function ChatsPage() {
       end: "",
     },
   });
+  const [platformOptions, setPlatformOptions] = useState<{ key: string; name: string }[]>([]);
+  const [organisationOptions, setOrganisationOptions] = useState<{ _id: string; name: string }[]>(
+    [],
+  );
+  const [userOptions, setUserOptions] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -117,6 +123,19 @@ export default function ChatsPage() {
       ...prev,
       [key]: value,
     }));
+
+    if (key === "platform" && typeof value === "string") {
+      fetchOrganisations(value);
+      setOrganisationOptions([]);
+      setUserOptions([]);
+      setFilters((prev) => ({ ...prev, tenant: "", user: "" }));
+    }
+
+    if (key === "tenant" && typeof value === "string") {
+      fetchUsers(value);
+      setUserOptions([]);
+      setFilters((prev) => ({ ...prev, user: "" }));
+    }
   };
 
   // Helper function to clean filter parameters
@@ -170,6 +189,63 @@ export default function ChatsPage() {
       throw error;
     }
   };
+
+  const fetchPlatforms = async () => {
+    try {
+      const response = await get<{ key: string; name: string }[]>("/admin/platform-data");
+
+      if (response) {
+        setPlatformOptions(response);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to fetch data";
+      console.error("Error fetching platforms:", message);
+    }
+  };
+
+  const fetchOrganisations = async (platformKey: string) => {
+    if (!platformKey) return;
+    try {
+      const response = await get<{ _id: string; name: string }[]>(
+        `/admin/organization/${platformKey}`,
+      );
+
+      if (response) {
+        const mapped = response.map((org) => ({
+          _id: org._id,
+          name: org.name,
+        }));
+        setOrganisationOptions(mapped);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to fetch organization";
+      console.error("Error fetching organizations", message);
+    }
+  };
+
+  const fetchUsers = async (tenantId: string) => {
+    if (!tenantId) return;
+    try {
+      const response = await get<{
+        users: { _id: string; displayName: string; employeeId: string }[];
+      }>(`/admin/users/${tenantId}`);
+
+      if (response && Array.isArray(response.users)) {
+        const mapped = response?.users?.map((user) => ({
+          name: user.displayName?.trim() || user.employeeId,
+          id: user.employeeId,
+        }));
+        setUserOptions(mapped);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to fetch users";
+      console.error("Error fetching users:", message);
+    }
+  };
+
+  useEffect(() => {
+    fetchPlatforms();
+  }, []);
 
   const handleApplyFilters = async () => {
     try {
@@ -295,9 +371,11 @@ export default function ChatsPage() {
                   className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="">All Platforms</option>
-                  <option value="web">Web</option>
-                  <option value="mobile">Mobile</option>
-                  <option value="api">API</option>
+                  {platformOptions.map((platform) => (
+                    <option key={platform.key} value={platform.key}>
+                      {platform.name}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -309,9 +387,11 @@ export default function ChatsPage() {
                   className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="">All Tenants</option>
-                  <option value="tenant1">Tenant 1</option>
-                  <option value="tenant2">Tenant 2</option>
-                  <option value="tenant3">Tenant 3</option>
+                  {organisationOptions.map((org) => (
+                    <option key={org._id} value={org._id}>
+                      {org.name}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -323,9 +403,11 @@ export default function ChatsPage() {
                   className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="">All Users</option>
-                  <option value="user1">User 1</option>
-                  <option value="user2">User 2</option>
-                  <option value="user3">User 3</option>
+                  {userOptions.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name}
+                    </option>
+                  ))}
                 </select>
               </div>
 
