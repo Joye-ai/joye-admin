@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Layout } from "@/components/layout";
 import {
@@ -46,16 +46,32 @@ interface KPIData {
 export default function ChatsPage() {
   const router = useRouter();
   const isAuthenticated = useAppSelector((s) => s.auth.isAuthenticated);
+  const didFetchPlatforms = useRef(false);
+
+  const getCurrentWeekRange = () => {
+    const now = new Date();
+    const day = now.getDay();
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + diffToMonday);
+    monday.setHours(0, 0, 0, 0);
+
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+
+    return {
+      start: monday.toISOString().split("T")[0],
+      end: sunday.toISOString().split("T")[0],
+    };
+  };
 
   const [filters, setFilters] = useState<FilterState>({
     platform: "",
     tenant: "",
     user: "",
     featureTypes: [],
-    dateRange: {
-      start: "",
-      end: "",
-    },
+    dateRange: getCurrentWeekRange(),
   });
   const [platformOptions, setPlatformOptions] = useState<{ key: string; name: string }[]>([]);
   const [organisationOptions, setOrganisationOptions] = useState<{ _id: string; name: string }[]>(
@@ -66,6 +82,10 @@ export default function ChatsPage() {
   useEffect(() => {
     if (!isAuthenticated) {
       router.replace(ROUTES.LOGIN);
+    }
+    if (!didFetchPlatforms.current) {
+      didFetchPlatforms.current = true;
+      fetchPlatforms();
     }
   }, [router, isAuthenticated]);
 
@@ -121,7 +141,7 @@ export default function ChatsPage() {
   ) => {
     setFilters((prev) => ({
       ...prev,
-      [key]: value,
+      [key]: value || (key === "dateRange" ? getCurrentWeekRange() : value),
     }));
 
     if (key === "platform" && typeof value === "string") {
@@ -227,12 +247,12 @@ export default function ChatsPage() {
     if (!tenantId) return;
     try {
       const response = await get<{
-        users: { _id: string; displayName: string; employeeId: string }[];
+        users: { _id: string; email: string; employeeId: string }[];
       }>(`/admin/users/${tenantId}`);
 
       if (response && Array.isArray(response.users)) {
         const mapped = response?.users?.map((user) => ({
-          name: user.displayName?.trim() || user.employeeId,
+          name: user.email?.trim() || user.employeeId,
           id: user.employeeId,
         }));
         setUserOptions(mapped);
@@ -242,10 +262,6 @@ export default function ChatsPage() {
       console.error("Error fetching users:", message);
     }
   };
-
-  useEffect(() => {
-    fetchPlatforms();
-  }, []);
 
   const handleApplyFilters = async () => {
     try {
