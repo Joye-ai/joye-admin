@@ -43,6 +43,22 @@ interface KPIData {
   totalOutputTokens: number;
 }
 
+interface KPIStats {
+  type: string;
+  model: string;
+  sessionCount: number;
+  totalTurns: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheCreationTokens: number;
+}
+
+type ChatResponse = {
+  consolidated: KPIStats;
+  types: KPIStats[];
+};
+
 export default function ChatsPage() {
   const router = useRouter();
   const isAuthenticated = useAppSelector((s) => s.auth.isAuthenticated);
@@ -78,6 +94,7 @@ export default function ChatsPage() {
     [],
   );
   const [userOptions, setUserOptions] = useState<{ id: string; name: string }[]>([]);
+  const [chatData, setChatData] = useState<ChatResponse | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -89,50 +106,23 @@ export default function ChatsPage() {
     }
   }, [router, isAuthenticated]);
 
-  // Mock data for demonstration
-  const consolidatedData: KPIData = {
-    model: "GPT-4",
-    sessions: 1250,
-    turnsPerSession: 3.2,
-    totalTurns: 4000,
-    inputTokensPerSession: 150,
-    totalInputTokens: 187500,
-    cacheCreationTokensPerSession: 25,
-    totalCacheCreationTokens: 31250,
-    cacheReadTokensPerSession: 30,
-    totalCacheReadTokens: 37500,
-    outputTokensPerSession: 200,
-    totalOutputTokens: 250000,
-  };
+  const mapApiToKPIData = (stats: KPIStats) => {
+    const sessions = stats.sessionCount || 0;
 
-  const brewData: KPIData = {
-    model: "GPT-4",
-    sessions: 450,
-    turnsPerSession: 2.8,
-    totalTurns: 1260,
-    inputTokensPerSession: 120,
-    totalInputTokens: 54000,
-    cacheCreationTokensPerSession: 20,
-    totalCacheCreationTokens: 9000,
-    cacheReadTokensPerSession: 25,
-    totalCacheReadTokens: 11250,
-    outputTokensPerSession: 180,
-    totalOutputTokens: 81000,
-  };
-
-  const mindfulMinuteData: KPIData = {
-    model: "GPT-4",
-    sessions: 800,
-    turnsPerSession: 3.5,
-    totalTurns: 2800,
-    inputTokensPerSession: 180,
-    totalInputTokens: 144000,
-    cacheCreationTokensPerSession: 30,
-    totalCacheCreationTokens: 24000,
-    cacheReadTokensPerSession: 35,
-    totalCacheReadTokens: 28000,
-    outputTokensPerSession: 220,
-    totalOutputTokens: 176000,
+    return {
+      model: stats.model,
+      sessions: stats.sessionCount || 0,
+      turnsPerSession: sessions > 0 ? stats.totalTurns : 0,
+      totalTurns: stats.totalTurns,
+      inputTokensPerSession: sessions > 0 ? stats.totalInputTokens : 0,
+      totalInputTokens: stats.totalInputTokens,
+      cacheCreationTokensPerSession: sessions > 0 ? stats.totalCacheCreationTokens : 0,
+      totalCacheCreationTokens: stats.totalCacheCreationTokens,
+      cacheReadTokensPerSession: sessions > 0 ? stats.totalCacheReadTokens : 0,
+      totalCacheReadTokens: stats.totalCacheReadTokens,
+      outputTokensPerSession: sessions > 0 ? stats.totalOutputTokens : 0,
+      totalOutputTokens: stats.totalOutputTokens,
+    };
   };
 
   const handleFilterChange = (
@@ -186,27 +176,42 @@ export default function ChatsPage() {
     return cleanedParams;
   };
 
-  // API call function (replace with actual implementation)
-  const fetchChatData = async (params: any) => {
+  const formatDate = (date: string) => {
+    if (!date) return "";
+    const [year, month, day] = date.split("-");
+    return `${day}-${month}-${year}`;
+  };
+
+  const mapFiltersToPayload = (filters: FilterState) => {
+    const payload = {
+      empId: filters.user || "",
+      type: filters.featureTypes[0] || "",
+      platform: filters.platform || "",
+      organizationId: filters.tenant || "",
+      startDate: filters.dateRange.start ? formatDate(filters.dateRange.start) : "",
+      endDate: filters.dateRange.end ? formatDate(filters.dateRange.end) : "",
+    };
+
+    //  Remove keys with empty string values
+    const cleanedPayload = Object.fromEntries(
+      Object.entries(payload).filter(([_, value]) => value !== ""),
+    );
+
+    //  If cleanedPayload is empty, return {}
+    return Object.keys(cleanedPayload).length > 0 ? cleanedPayload : {};
+  };
+
+  const fetchChatData = async (filters: FilterState) => {
     try {
-      // Example API call structure
-      const response = await fetch("/api/chats/insights", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(params),
-      });
+      const payload = mapFiltersToPayload(filters);
 
-      if (!response.ok) {
-        throw new Error("Failed to fetch chat data");
+      const response = await post<ChatResponse>("/admin/chat-insight", payload);
+      if (response) {
+        setChatData(response);
       }
-
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      console.error("Error fetching chat data:", error);
-      throw error;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to chat-insights data";
+      console.error("Error showing chat-insights:", message);
     }
   };
 
@@ -270,7 +275,7 @@ export default function ChatsPage() {
       console.log("Filter parameters for API call:", filterParams);
 
       // TODO: Uncomment when API is ready
-      // const chatData = await fetchChatData(filterParams);
+      const chatData = await fetchChatData(filters);
       // Update state with fetched data
 
       // For now, just show the parameters
@@ -334,29 +339,29 @@ export default function ChatsPage() {
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPITile
-          title="Number of Sessions"
-          value={data.sessions.toLocaleString()}
-          subtitle={`Total: ${data.totalTurns.toLocaleString()} turns`}
+          title="Total Number of Sessions Count"
+          value={data.sessions.toString()}
+          subtitle={`Total: ${data.sessions} sessions`}
         />
         <KPITile
-          title="Turns Per Session"
+          title="Total Turns Per Session"
           value={data.turnsPerSession.toString()}
           subtitle={`Total: ${data.totalTurns.toLocaleString()}`}
         />
         <KPITile
-          title="Input Tokens per session"
+          title="Total Input Tokens per session"
           value={data.inputTokensPerSession.toString()}
           subtitle={`Total: ${data.totalInputTokens.toLocaleString()}`}
         />
         <KPITile
-          title="Output Tokens per session"
+          title="Total Output Tokens per session"
           value={data.outputTokensPerSession.toString()}
           subtitle={`Total: ${data.totalOutputTokens.toLocaleString()}`}
         />
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <KPITile
-          title="Cache Creation Input Tokens per session"
+          title="Total Cache Creation Input Tokens per session"
           value={data.cacheCreationTokensPerSession.toString()}
           subtitle={`Total: ${data.totalCacheCreationTokens.toLocaleString()}`}
         />
@@ -403,11 +408,15 @@ export default function ChatsPage() {
                   className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
                   <option value="">All Tenants</option>
-                  {organisationOptions.map((org) => (
-                    <option key={org._id} value={org._id}>
-                      {org.name}
-                    </option>
-                  ))}
+                  {organisationOptions.length === 0 ? (
+                    <option disabled>No data found</option>
+                  ) : (
+                    organisationOptions.map((org) => (
+                      <option key={org._id} value={org._id}>
+                        {org.name}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 
@@ -431,9 +440,10 @@ export default function ChatsPage() {
                 <MultiSelect
                   label="Feature Type"
                   options={[
-                    { value: "all", label: "All" },
                     { value: "brew", label: "Brew" },
-                    { value: "mindful", label: "Mindful Minute" },
+                    { value: "mindful-minute", label: "Mindful Minute" },
+                    { value: "byb", label: "BYB" },
+                    { value: "quick-jl", label: "Quick JL" },
                   ]}
                   value={filters.featureTypes}
                   onChange={(value) => handleFilterChange("featureTypes", value)}
@@ -462,21 +472,26 @@ export default function ChatsPage() {
         <div className="space-y-6">
           <h2 className="text-xl font-semibold text-gray-900">KPIs</h2>
 
-          {/* Consolidated View */}
-          <KPISection title="Total: (Consolidated view)" data={consolidatedData} />
+          {chatData && (
+            <>
+              <KPISection
+                title="Total: (Consolidated view)"
+                data={mapApiToKPIData(chatData.consolidated)}
+              />
 
-          {/* Feature-specific sections - separate white boxes */}
-          <Card>
-            <CardContent>
-              <KPISection title="Feature Name - Brew" data={brewData} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent>
-              <KPISection title="Feature Name - Mindful Minute" data={mindfulMinuteData} />
-            </CardContent>
-          </Card>
+              {chatData.types.map((t) => (
+                <Card key={`${t.type}-${t.model}`}>
+                  <CardContent>
+                    <KPISection
+                      title={`Type - ${t.type}`}
+                      data={mapApiToKPIData(t)}
+                      modelOverride={t.model}
+                    />
+                  </CardContent>
+                </Card>
+              ))}
+            </>
+          )}
         </div>
       </div>
     </Layout>
