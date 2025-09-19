@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 import { Layout } from "@/components/layout";
 import {
@@ -11,10 +11,11 @@ import {
   CardTitle,
   CardContent,
   MultiSelect,
+  SearchableSelect,
   DateRangePicker,
 } from "@/components/ui";
 import { ROUTES } from "@/constants";
-import { post, patch, get } from "@/helpers/api";
+import { post, get } from "@/helpers/api";
 import { useAppSelector } from "@/store";
 
 interface FilterState {
@@ -95,6 +96,7 @@ export default function ChatsPage() {
   );
   const [userOptions, setUserOptions] = useState<{ id: string; name: string }[]>([]);
   const [chatData, setChatData] = useState<ChatResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -149,7 +151,7 @@ export default function ChatsPage() {
   };
 
   // Helper function to clean filter parameters
-  const prepareFilterParams = () => {
+  const prepareFilterParams = useCallback(() => {
     const filterParams = {
       platform: filters.platform || null,
       tenant: filters.tenant || null,
@@ -174,7 +176,7 @@ export default function ChatsPage() {
     );
 
     return cleanedParams;
-  };
+  }, [filters]);
 
   const formatDate = (date: string) => {
     if (!date) return "";
@@ -182,7 +184,7 @@ export default function ChatsPage() {
     return `${day}-${month}-${year}`;
   };
 
-  const mapFiltersToPayload = (filters: FilterState) => {
+  const mapFiltersToPayload = useCallback((filters: FilterState) => {
     const payload = {
       empId: filters.user || "",
       type: filters.featureTypes[0] || "",
@@ -194,26 +196,29 @@ export default function ChatsPage() {
 
     //  Remove keys with empty string values
     const cleanedPayload = Object.fromEntries(
-      Object.entries(payload).filter(([_, value]) => value !== ""),
+      Object.entries(payload).filter(([, value]) => value !== ""),
     );
 
     //  If cleanedPayload is empty, return {}
     return Object.keys(cleanedPayload).length > 0 ? cleanedPayload : {};
-  };
+  }, []);
 
-  const fetchChatData = async (filters: FilterState) => {
-    try {
-      const payload = mapFiltersToPayload(filters);
+  const fetchChatData = useCallback(
+    async (filters: FilterState) => {
+      try {
+        const payload = mapFiltersToPayload(filters);
 
-      const response = await post<ChatResponse>("/admin/chat-insight", payload);
-      if (response) {
-        setChatData(response);
+        const response = await post<ChatResponse>("/admin/chat-insight", payload);
+        if (response) {
+          setChatData(response);
+        }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "Failed to chat-insights data";
+        console.error("Error showing chat-insights:", message);
       }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Failed to chat-insights data";
-      console.error("Error showing chat-insights:", message);
-    }
-  };
+    },
+    [mapFiltersToPayload],
+  );
 
   const fetchPlatforms = async () => {
     try {
@@ -268,23 +273,33 @@ export default function ChatsPage() {
     }
   };
 
-  const handleApplyFilters = async () => {
+  const handleApplyFilters = useCallback(async () => {
     try {
+      setIsLoading(true);
       const filterParams = prepareFilterParams();
 
       console.log("Filter parameters for API call:", filterParams);
 
       // TODO: Uncomment when API is ready
-      const chatData = await fetchChatData(filters);
+      await fetchChatData(filters);
       // Update state with fetched data
 
       // For now, just show the parameters
-      alert(`Filters applied!\n\nParameters:\n${JSON.stringify(filterParams, null, 2)}`);
+      console.log(`Filters applied!\n\nParameters:\n${JSON.stringify(filterParams, null, 2)}`);
     } catch (error) {
       console.error("Error applying filters:", error);
       alert("Error applying filters. Please try again.");
+    } finally {
+      setIsLoading(false);
     }
-  };
+  }, [filters, prepareFilterParams, fetchChatData]);
+
+  // Auto-load data with default filters when component mounts
+  useEffect(() => {
+    if (isAuthenticated && platformOptions.length > 0) {
+      handleApplyFilters();
+    }
+  }, [isAuthenticated, platformOptions.length, handleApplyFilters]);
 
   const KPITile = ({
     title,
@@ -385,55 +400,48 @@ export default function ChatsPage() {
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Platform</label>
-                <select
+                <SearchableSelect
+                  label="Platform"
+                  options={platformOptions.map((platform) => ({
+                    value: platform.key,
+                    label: platform.name,
+                  }))}
                   value={filters.platform}
-                  onChange={(e) => handleFilterChange("platform", e.target.value)}
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">All Platforms</option>
-                  {platformOptions.map((platform) => (
-                    <option key={platform.key} value={platform.key}>
-                      {platform.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(value) => handleFilterChange("platform", value)}
+                  placeholder="All Platforms"
+                  emptyMessage="No platforms found"
+                  disabled={platformOptions.length === 0}
+                />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tenant</label>
-                <select
+                <SearchableSelect
+                  label="Tenant"
+                  options={organisationOptions.map((org) => ({
+                    value: org._id,
+                    label: org.name,
+                  }))}
                   value={filters.tenant}
-                  onChange={(e) => handleFilterChange("tenant", e.target.value)}
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">All Tenants</option>
-                  {organisationOptions.length === 0 ? (
-                    <option disabled>No data found</option>
-                  ) : (
-                    organisationOptions.map((org) => (
-                      <option key={org._id} value={org._id}>
-                        {org.name}
-                      </option>
-                    ))
-                  )}
-                </select>
+                  onChange={(value) => handleFilterChange("tenant", value)}
+                  placeholder="All Tenants"
+                  emptyMessage="No tenants found"
+                  disabled={organisationOptions.length === 0}
+                />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">User</label>
-                <select
+                <SearchableSelect
+                  label="User"
+                  options={userOptions.map((user) => ({
+                    value: user.id,
+                    label: user.name,
+                  }))}
                   value={filters.user}
-                  onChange={(e) => handleFilterChange("user", e.target.value)}
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">All Users</option>
-                  {userOptions.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(value) => handleFilterChange("user", value)}
+                  placeholder="All Users"
+                  emptyMessage="No users found"
+                  disabled={userOptions.length === 0}
+                />
               </div>
 
               <div>
@@ -461,8 +469,34 @@ export default function ChatsPage() {
             </div>
 
             <div className="mt-4 flex justify-end">
-              <Button variant="primary" onClick={handleApplyFilters}>
-                Apply Filters
+              <Button variant="primary" onClick={handleApplyFilters} disabled={isLoading}>
+                {isLoading ? (
+                  <div className="flex items-center">
+                    <svg
+                      className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      ></circle>
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    Loading...
+                  </div>
+                ) : (
+                  "Apply Filters"
+                )}
               </Button>
             </div>
           </CardContent>
