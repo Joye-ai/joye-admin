@@ -120,7 +120,7 @@ export const DateRangePicker = ({
                 className="text-gray-400 hover:text-gray-600 p-1"
               >
                 <svg
-                  className={`w-5 h-5 transition-transform duration-200 ${
+                  className={`w-4 h-5 transition-transform duration-200 ${
                     isOpen ? "rotate-180" : ""
                   }`}
                   fill="none"

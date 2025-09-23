@@ -352,40 +352,57 @@ export default function ChatsPage() {
         <h3 className="text-lg font-medium text-gray-900">{title}</h3>
         <p className="text-sm text-gray-600">Model: {modelOverride || data.model}</p>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPITile
-          title="Total Number of Sessions Count"
-          value={data.sessions.toString()}
-          subtitle={`Total: ${data.sessions} sessions`}
-        />
-        <KPITile
-          title="Total Turns Per Session"
-          value={data.turnsPerSession.toString()}
-          subtitle={`Total: ${data.totalTurns.toLocaleString()}`}
-        />
-        <KPITile
-          title="Total Input Tokens per session"
-          value={data.inputTokensPerSession.toString()}
-          subtitle={`Total: ${data.totalInputTokens.toLocaleString()}`}
-        />
-        <KPITile
-          title="Total Output Tokens per session"
-          value={data.outputTokensPerSession.toString()}
-          subtitle={`Total: ${data.totalOutputTokens.toLocaleString()}`}
-        />
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <KPITile
-          title="Total Cache Creation Input Tokens per session"
-          value={data.cacheCreationTokensPerSession.toString()}
-          subtitle={`Total: ${data.totalCacheCreationTokens.toLocaleString()}`}
-        />
-        <KPITile
-          title="Cache Read Input Tokens per session"
-          value={data.cacheReadTokensPerSession.toString()}
-          subtitle={`Total: ${data.totalCacheReadTokens.toLocaleString()}`}
-        />
-      </div>
+      {/** Precompute per-session metrics */}
+      {(() => {
+        const sessions = data.sessions ?? 0;
+        const turnsPerSession = sessions > 0 ? (data.totalTurns / sessions).toFixed(1) : "0";
+        const inputTokensPerSession =
+          sessions > 0 ? Math.round(data.totalInputTokens / sessions) : "0";
+        const cacheCreationTokensPerSession =
+          sessions > 0 ? Math.round(data.totalCacheCreationTokens / sessions) : "0";
+        const cacheReadTokensPerSession =
+          sessions > 0 ? Math.round(data.totalCacheReadTokens / sessions) : "0";
+        const outputTokensPerSession =
+          sessions > 0 ? Math.round(data.totalOutputTokens / sessions) : "0";
+        return (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4">
+              <KPITile
+                title="Number of Sessions Count"
+                value={sessions.toString()}
+                subtitle={`Total: ${sessions} sessions`}
+              />
+              <KPITile
+                title="Turns Per Session"
+                value={turnsPerSession}
+                subtitle={`Total: ${data.totalTurns.toLocaleString()}`}
+              />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <KPITile
+                title="Input Tokens per session"
+                value={inputTokensPerSession}
+                subtitle={`Total: ${data.totalInputTokens.toLocaleString()}`}
+              />
+              <KPITile
+                title="Cache Write Tokens per session"
+                value={cacheCreationTokensPerSession}
+                subtitle={`Total: ${data.totalCacheCreationTokens.toLocaleString()}`}
+              />
+              <KPITile
+                title="Cache Read Tokens per session"
+                value={cacheReadTokensPerSession}
+                subtitle={`Total: ${data.totalCacheReadTokens.toLocaleString()}`}
+              />
+              <KPITile
+                title="Output Tokens per session"
+                value={outputTokensPerSession}
+                subtitle={`Total: ${data.totalOutputTokens.toLocaleString()}`}
+              />
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 
@@ -459,7 +476,7 @@ export default function ChatsPage() {
                 />
               </div>
 
-              <div className="lg:col-span-2">
+              <div>
                 <DateRangePicker
                   label="Date Range"
                   value={filters.dateRange}
