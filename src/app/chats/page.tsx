@@ -187,7 +187,7 @@ export default function ChatsPage() {
   const mapFiltersToPayload = useCallback((filters: FilterState) => {
     const payload = {
       empId: filters.user || "",
-      type: filters.featureTypes[0] || "",
+      type: filters.featureTypes.length > 0 ? filters.featureTypes.join(",") : "",
       platform: filters.platform || "",
       organizationId: filters.tenant || "",
       startDate: filters.dateRange.start ? formatDate(filters.dateRange.start) : "",
@@ -311,7 +311,7 @@ export default function ChatsPage() {
     title: string;
     value: string;
     subtitle?: string;
-    change?: string;
+    change?: string | number;
     changeType?: "increase" | "decrease";
   }) => (
     <Card>
@@ -357,20 +357,20 @@ export default function ChatsPage() {
         const sessions = data.sessions ?? 0;
         const turnsPerSession = sessions > 0 ? (data.totalTurns / sessions).toFixed(1) : "0";
         const inputTokensPerSession =
-          sessions > 0 ? Math.round(data.totalInputTokens / sessions) : "0";
+          sessions > 0 ? Math.round(data.totalInputTokens / sessions).toString() : "0";
         const cacheCreationTokensPerSession =
-          sessions > 0 ? Math.round(data.totalCacheCreationTokens / sessions) : "0";
+          sessions > 0 ? Math.round(data.totalCacheCreationTokens / sessions).toString() : "0";
         const cacheReadTokensPerSession =
-          sessions > 0 ? Math.round(data.totalCacheReadTokens / sessions) : "0";
+          sessions > 0 ? Math.round(data.totalCacheReadTokens / sessions).toString() : "0";
         const outputTokensPerSession =
-          sessions > 0 ? Math.round(data.totalOutputTokens / sessions) : "0";
+          sessions > 0 ? Math.round(data.totalOutputTokens / sessions).toString() : "0";
         return (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4">
               <KPITile
                 title="Number of Sessions Count"
                 value={sessions.toString()}
-                subtitle={`Total: ${sessions} sessions`}
+                subtitle={`No of Users: ${sessions} sessions`}
               />
               <KPITile
                 title="Turns Per Session"
@@ -530,8 +530,8 @@ export default function ChatsPage() {
                 data={mapApiToKPIData(chatData.consolidated)}
               />
 
-              {chatData.types.map((t) => (
-                <Card key={`${t.type}-${t.model}`}>
+              {chatData.types.map((t, idx) => (
+                <Card key={`${t.type}-${t.model}- ${idx}`}>
                   <CardContent>
                     <KPISection
                       title={`Type - ${t.type}`}
