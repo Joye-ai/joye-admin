@@ -42,6 +42,11 @@ interface KPIData {
   totalCacheReadTokens: number;
   outputTokensPerSession: number;
   totalOutputTokens: number;
+  totaluniqueUsersCount: number;
+  lessThan5Turns: number;
+  greaterThanOrEq5: number;
+  greaterThanOrEq10: number;
+  greaterThanOrEq15: number;
 }
 
 interface KPIStats {
@@ -53,6 +58,11 @@ interface KPIStats {
   totalOutputTokens: number;
   totalCacheReadTokens: number;
   totalCacheCreationTokens: number;
+  totaluniqueUsersCount: number;
+  lessThan5Turns: number;
+  greaterThanOrEq5: number;
+  greaterThanOrEq10: number;
+  greaterThanOrEq15: number;
 }
 
 type ChatResponse = {
@@ -124,6 +134,11 @@ export default function ChatsPage() {
       totalCacheReadTokens: stats.totalCacheReadTokens,
       outputTokensPerSession: sessions > 0 ? stats.totalOutputTokens : 0,
       totalOutputTokens: stats.totalOutputTokens,
+      totaluniqueUsersCount: stats.totaluniqueUsersCount,
+      lessThan5Turns: stats.lessThan5Turns,
+      greaterThanOrEq5: stats.greaterThanOrEq5,
+      greaterThanOrEq10: stats.greaterThanOrEq10,
+      greaterThanOrEq15: stats.greaterThanOrEq15,
     };
   };
 
@@ -187,7 +202,7 @@ export default function ChatsPage() {
   const mapFiltersToPayload = useCallback((filters: FilterState) => {
     const payload = {
       empId: filters.user || "",
-      type: filters.featureTypes[0] || "",
+      type: filters.featureTypes.length > 0 ? filters.featureTypes.join(",") : "",
       platform: filters.platform || "",
       organizationId: filters.tenant || "",
       startDate: filters.dateRange.start ? formatDate(filters.dateRange.start) : "",
@@ -310,8 +325,8 @@ export default function ChatsPage() {
   }: {
     title: string;
     value: string;
-    subtitle?: string;
-    change?: string;
+    subtitle?: React.ReactNode;
+    change?: string | number;
     changeType?: "increase" | "decrease";
   }) => (
     <Card>
@@ -357,25 +372,47 @@ export default function ChatsPage() {
         const sessions = data.sessions ?? 0;
         const turnsPerSession = sessions > 0 ? (data.totalTurns / sessions).toFixed(1) : "0";
         const inputTokensPerSession =
-          sessions > 0 ? Math.round(data.totalInputTokens / sessions) : "0";
+          sessions > 0 ? Math.round(data.totalInputTokens / sessions).toString() : "0";
         const cacheCreationTokensPerSession =
-          sessions > 0 ? Math.round(data.totalCacheCreationTokens / sessions) : "0";
+          sessions > 0 ? Math.round(data.totalCacheCreationTokens / sessions).toString() : "0";
         const cacheReadTokensPerSession =
-          sessions > 0 ? Math.round(data.totalCacheReadTokens / sessions) : "0";
+          sessions > 0 ? Math.round(data.totalCacheReadTokens / sessions).toString() : "0";
         const outputTokensPerSession =
-          sessions > 0 ? Math.round(data.totalOutputTokens / sessions) : "0";
+          sessions > 0 ? Math.round(data.totalOutputTokens / sessions).toString() : "0";
+        const totaluniqueUsersCount = data?.totaluniqueUsersCount
+          ? Math.round(data.totaluniqueUsersCount).toString()
+          : "0";
+
         return (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4">
               <KPITile
                 title="Number of Sessions Count"
                 value={sessions.toString()}
-                subtitle={`Total: ${sessions} sessions`}
+                subtitle={`No of Users: ${totaluniqueUsersCount} `}
               />
               <KPITile
                 title="Turns Per Session"
                 value={turnsPerSession}
-                subtitle={`Total: ${data.totalTurns.toLocaleString()}`}
+                subtitle={
+                  <>
+                    <div>Total: {data.totalTurns.toLocaleString()}</div>
+                    <div className="mt-1 text-gray-400 text-xs flex flex-wrap gap-4">
+                      <div>
+                        {"<5"}: {data.lessThan5Turns ?? 0}
+                      </div>
+                      <div>
+                        {">=5"}: {data.greaterThanOrEq5 ?? 0}
+                      </div>
+                      <div>
+                        {">=10"}: {data.greaterThanOrEq10 ?? 0}
+                      </div>
+                      <div>
+                        {">=15"}: {data.greaterThanOrEq15 ?? 0}
+                      </div>
+                    </div>
+                  </>
+                }
               />
             </div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -530,8 +567,8 @@ export default function ChatsPage() {
                 data={mapApiToKPIData(chatData.consolidated)}
               />
 
-              {chatData.types.map((t) => (
-                <Card key={`${t.type}-${t.model}`}>
+              {chatData.types.map((t, idx) => (
+                <Card key={`${t.type}-${t.model}- ${idx}`}>
                   <CardContent>
                     <KPISection
                       title={`Type - ${t.type}`}
