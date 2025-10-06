@@ -22,6 +22,7 @@ const CATEGORY_OPTIONS = [
   { label: "Mindful Minute", value: "mindful-minute" },
   { label: "Quick JL", value: "quick-jl" },
   { label: "BYB", value: "byb" },
+  { label: "Make Today Great", value: "today-great" },
 ] as const;
 
 export default function PromptsPage() {
