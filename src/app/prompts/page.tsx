@@ -23,6 +23,7 @@ const CATEGORY_OPTIONS = [
   { label: "Quick JL", value: "quick-jl" },
   { label: "BYB", value: "byb" },
   { label: "Make Today Great", value: "today-great" },
+  { label: "Monday Insights", value: "monday-insights" },
 ] as const;
 
 export default function PromptsPage() {
