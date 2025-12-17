@@ -26,7 +26,7 @@ interface FilterState {
   dateRange: {
     start: string;
     end: string;
-  };
+  }; //
 }
 
 interface KPIData {
