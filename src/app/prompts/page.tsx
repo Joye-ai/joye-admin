@@ -24,6 +24,7 @@ const CATEGORY_OPTIONS = [
   { label: "BYB", value: "byb" },
   { label: "Make Today Great", value: "today-great" },
   { label: "Monday Insights", value: "monday-insights" },
+  { label: "Daily Suggestions", value: "daily-suggestions" },
 ] as const;
 
 export default function PromptsPage() {
