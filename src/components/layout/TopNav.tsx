@@ -20,6 +20,7 @@ export function TopNav() {
     { label: "Dashboard", href: ROUTES.DASHBOARD },
     { label: "Prompts", href: ROUTES.PROMPTS },
     { label: "Chats", href: ROUTES.CHATS },
+    { label: "Notification Logs", href: ROUTES.NOTIFICATION_LOGS },
     { label: "Users", href: ROUTES.USERS },
   ];
 

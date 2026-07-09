@@ -71,12 +71,14 @@ export const post = <T = unknown>(
   endpoint: string,
   payload?: unknown,
   useNextServer: boolean = false,
+  signal?: AbortSignal,
 ): Promise<T> => {
   return makeApiRequest<T>(
     endpoint,
     {
       method: "POST",
       body: payload ? JSON.stringify(payload) : undefined,
+      signal,
     },
     useNextServer,
   );
