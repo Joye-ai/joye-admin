@@ -185,6 +185,8 @@ const requiresPlatformForNotSent = (filterState: FilterState, logSearchState: Lo
   !filterState.tenant &&
   !filterState.user;
 
+const requiresPlatformSelection = (filterState: FilterState) => !filterState.platform;
+
 export default function NotificationLogsPage() {
   const router = useRouter();
   const isAuthenticated = useAppSelector((s) => s.auth.isAuthenticated);
@@ -370,6 +372,16 @@ export default function NotificationLogsPage() {
       setOrganisationOptions([]);
       setUserOptions([]);
       setFilters((prev) => ({ ...prev, tenant: "", user: "" }));
+      if (!value) {
+        setAnalytics(null);
+        setCoverage(null);
+        setLogs([]);
+        setGroups([]);
+        setUsersNotNotified([]);
+        setPagination({ page: 1, limit: 25, total: 0, totalPages: 0 });
+        setLogsView("list");
+        setActiveGroupBy("none");
+      }
     }
 
     if (key === "tenant" && typeof value === "string") {
@@ -380,6 +392,11 @@ export default function NotificationLogsPage() {
   };
 
   const handleApplyFilters = useCallback(async () => {
+    if (requiresPlatformSelection(filters)) {
+      setError("Select a platform before loading notification stats");
+      return;
+    }
+
     if (requiresPlatformForNotSent(filters, logSearch)) {
       setError("Select a platform or tenant before filtering Notification Not Sent Users");
       return;
@@ -400,6 +417,11 @@ export default function NotificationLogsPage() {
   }, [filters, logSearch, fetchData]);
 
   const handleApplyLogSearch = useCallback(async () => {
+    if (requiresPlatformSelection(filters)) {
+      setError("Select a platform before searching notification logs");
+      return;
+    }
+
     if (requiresPlatformForNotSent(filters, logSearch)) {
       setError("Select a platform or tenant before filtering Notification Not Sent Users");
       return;
@@ -420,6 +442,10 @@ export default function NotificationLogsPage() {
 
   const handlePageChange = async (newPage: number) => {
     if (newPage < 1 || newPage > pagination.totalPages) return;
+    if (requiresPlatformSelection(filters)) {
+      setError("Select a platform before loading notification logs");
+      return;
+    }
     try {
       setIsLoading(true);
       setError(null);
@@ -438,6 +464,16 @@ export default function NotificationLogsPage() {
   };
 
   const handleNotificationStatusChange = async (value: string) => {
+    if (requiresPlatformSelection(filters)) {
+      setLogSearch((prev) => ({
+        ...prev,
+        notificationStatus: value,
+        groupBy: value === "not_sent" ? "none" : prev.groupBy,
+      }));
+      setError("Select a platform before loading notification logs");
+      return;
+    }
+
     if (value === "not_sent" && !filters.platform && !filters.tenant && !filters.user) {
       setLogSearch((prev) => ({ ...prev, notificationStatus: value, groupBy: "none" }));
       setError("Select a platform or tenant before filtering Notification Not Sent Users");
@@ -477,11 +513,39 @@ export default function NotificationLogsPage() {
     }
   }, [router, isAuthenticated]);
 
+  // Auto-fetch only when a specific platform is chosen — never for "All Platforms".
   useEffect(() => {
-    if (isAuthenticated && platformOptions.length > 0) {
-      handleApplyFilters();
-    }
-  }, [isAuthenticated, platformOptions.length, handleApplyFilters]);
+    if (!isAuthenticated || !filters.platform) return;
+
+    let cancelled = false;
+    const run = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        await fetchData(filters, logSearch, 1);
+      } catch (e) {
+        if (!cancelled) {
+          setError(
+            getNotificationLogsErrorMessage(
+              e,
+              "Unable to load notification logs. Please try again.",
+            ),
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally only re-run when platform selection changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, filters.platform]);
 
   const KPITile = ({ title, value }: { title: string; value: string }) => (
     <Card>
@@ -509,7 +573,7 @@ export default function NotificationLogsPage() {
                 }))}
                 value={filters.platform}
                 onChange={(value) => handleFilterChange("platform", value)}
-                placeholder="All Platforms"
+                placeholder="Select Platform"
                 emptyMessage="No platforms found"
                 disabled={platformOptions.length === 0}
               />
