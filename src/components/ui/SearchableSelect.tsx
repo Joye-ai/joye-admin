@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react";
 interface Option {
   value: string;
   label: string;
+  disabled?: boolean;
 }
 
 interface SearchableSelectProps {
@@ -61,8 +62,9 @@ export const SearchableSelect = ({
     }
   };
 
-  const handleOptionSelect = (optionValue: string) => {
-    onChange(optionValue);
+  const handleOptionSelect = (option: Option) => {
+    if (option.disabled) return;
+    onChange(option.value);
     setIsOpen(false);
     setSearchTerm("");
   };
@@ -185,12 +187,20 @@ export const SearchableSelect = ({
                   <button
                     key={option.value}
                     type="button"
-                    onClick={() => handleOptionSelect(option.value)}
+                    onClick={() => handleOptionSelect(option)}
+                    disabled={option.disabled}
                     role="option"
                     aria-selected={value === option.value}
+                    aria-disabled={option.disabled || undefined}
                     className={`
-                      w-full text-left px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer
-                      ${value === option.value ? "bg-blue-50 text-blue-900" : "text-gray-900"}
+                      w-full text-left px-3 py-2 text-sm
+                      ${
+                        option.disabled
+                          ? "text-gray-400 bg-gray-50 cursor-not-allowed opacity-70"
+                          : `hover:bg-gray-100 cursor-pointer ${
+                              value === option.value ? "bg-blue-50 text-blue-900" : "text-gray-900"
+                            }`
+                      }
                     `}
                   >
                     {option.label}
