@@ -54,6 +54,12 @@ const GROUP_BY_OPTIONS = [
   { value: "tId", label: "Tenant ID (TID)" },
 ];
 
+const USER_NOTIFICATION_STATUS_OPTIONS = [
+  { value: "all", label: "All Users" },
+  { value: "sent", label: "Notification Sent Users" },
+  { value: "not_sent", label: "Notification Not Sent Users" },
+];
+
 interface FilterState {
   platform: string;
   tenant: string;
@@ -71,6 +77,7 @@ interface LogSearchState {
   searchDate: string;
   searchMessageType: string;
   groupBy: string;
+  notificationStatus: string;
 }
 
 interface TenantCoverage {
@@ -118,11 +125,19 @@ interface NotificationLogGroupRow {
   uniqueUsers: number;
 }
 
+interface NotificationLogUserNotNotifiedRow {
+  employeeId: string;
+  email?: string;
+  organizationId?: string;
+  createdAt?: number;
+}
+
 interface NotificationLogsSearchResponse {
-  view: "list" | "grouped";
+  view: "list" | "grouped" | "notNotifiedUsers";
   groupBy?: string;
   logs: NotificationLogRow[];
   groups: NotificationLogGroupRow[];
+  usersNotNotified?: NotificationLogUserNotNotifiedRow[];
   pagination: {
     page: number;
     limit: number;
@@ -131,21 +146,11 @@ interface NotificationLogsSearchResponse {
   };
 }
 
-const getCurrentWeekRange = () => {
-  const now = new Date();
-  const day = now.getDay();
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + diffToMonday);
-  monday.setHours(0, 0, 0, 0);
-
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  sunday.setHours(23, 59, 59, 999);
-
+const getTodayRange = () => {
+  const today = new Date().toISOString().split("T")[0];
   return {
-    start: monday.toISOString().split("T")[0],
-    end: sunday.toISOString().split("T")[0],
+    start: today,
+    end: today,
   };
 };
 
@@ -160,6 +165,26 @@ const formatSentTime = (sentTime: number) => {
   return new Date(sentTime).toLocaleString();
 };
 
+const getNotificationLogsErrorMessage = (error: unknown, fallback: string) => {
+  if (!(error instanceof Error) || !error.message) return fallback;
+  const message = error.message.trim();
+  if (
+    message.startsWith("API ") ||
+    message.startsWith("Request failed") ||
+    message === "Failed to fetch" ||
+    message.includes("Failed to fetch")
+  ) {
+    return fallback;
+  }
+  return message;
+};
+
+const requiresPlatformForNotSent = (filterState: FilterState, logSearchState: LogSearchState) =>
+  logSearchState.notificationStatus === "not_sent" &&
+  !filterState.platform &&
+  !filterState.tenant &&
+  !filterState.user;
+
 export default function NotificationLogsPage() {
   const router = useRouter();
   const isAuthenticated = useAppSelector((s) => s.auth.isAuthenticated);
@@ -171,25 +196,27 @@ export default function NotificationLogsPage() {
     user: "",
     messageTypes: [],
     channels: [],
-    dateRange: getCurrentWeekRange(),
+    dateRange: getTodayRange(),
   });
   const [logSearch, setLogSearch] = useState<LogSearchState>({
     searchEmpId: "",
     searchDate: "",
     searchMessageType: "",
     groupBy: "none",
+    notificationStatus: "all",
   });
   const [platformOptions, setPlatformOptions] = useState<{ key: string; name: string }[]>([]);
-  const [organisationOptions, setOrganisationOptions] = useState<{ _id: string; name: string }[]>(
-    [],
-  );
+  const [organisationOptions, setOrganisationOptions] = useState<
+    { _id: string; name: string; inactive?: boolean }[]
+  >([]);
   const [userOptions, setUserOptions] = useState<{ id: string; name: string }[]>([]);
   const [analytics, setAnalytics] = useState<NotificationLogAnalytics | null>(null);
   const [coverage, setCoverage] = useState<NotificationLogCoverageAnalytics | null>(null);
   const [logs, setLogs] = useState<NotificationLogRow[]>([]);
   const [groups, setGroups] = useState<NotificationLogGroupRow[]>([]);
-  const [logsView, setLogsView] = useState<"list" | "grouped">("list");
+  const [logsView, setLogsView] = useState<"list" | "grouped" | "notNotifiedUsers">("list");
   const [activeGroupBy, setActiveGroupBy] = useState<string>("none");
+  const [usersNotNotified, setUsersNotNotified] = useState<NotificationLogUserNotNotifiedRow[]>([]);
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 25,
@@ -221,12 +248,18 @@ export default function NotificationLogsPage() {
         searchDate: logSearchState.searchDate.trim(),
         searchMessageType: logSearchState.searchMessageType.trim(),
         groupBy: logSearchState.groupBy || "none",
+        notificationStatus: logSearchState.notificationStatus || "all",
         page,
         limit: 25,
       };
 
       return Object.fromEntries(
-        Object.entries(payload).filter(([, value]) => value !== "" && value !== "none"),
+        Object.entries(payload).filter(
+          ([key, value]) =>
+            value !== "" &&
+            (key !== "groupBy" || value !== "none") &&
+            (key !== "notificationStatus" || value !== "all"),
+        ),
       );
     },
     [mapFiltersToPayload],
@@ -244,6 +277,7 @@ export default function NotificationLogsPage() {
         setActiveGroupBy(response.groupBy || "none");
         setLogs(response.logs || []);
         setGroups(response.groups || []);
+        setUsersNotNotified(response.usersNotNotified || []);
         setPagination(response.pagination);
       }
     },
@@ -264,11 +298,17 @@ export default function NotificationLogsPage() {
   const fetchOrganisations = async (platformKey: string) => {
     if (!platformKey) return;
     try {
-      const response = await get<{ _id: string; name: string }[]>(
+      const response = await get<{ _id: string; name: string; inactive?: boolean }[]>(
         `/admin/organization/${platformKey}`,
       );
       if (response) {
-        setOrganisationOptions(response.map((org) => ({ _id: org._id, name: org.name })));
+        setOrganisationOptions(
+          response.map((org) => ({
+            _id: org._id,
+            name: org.name,
+            inactive: Boolean(org.inactive),
+          })),
+        );
       }
     } catch (e) {
       console.error("Error fetching organizations:", e);
@@ -322,7 +362,7 @@ export default function NotificationLogsPage() {
   ) => {
     setFilters((prev) => ({
       ...prev,
-      [key]: value || (key === "dateRange" ? getCurrentWeekRange() : value),
+      [key]: value || (key === "dateRange" ? getTodayRange() : value),
     }));
 
     if (key === "platform" && typeof value === "string") {
@@ -340,13 +380,19 @@ export default function NotificationLogsPage() {
   };
 
   const handleApplyFilters = useCallback(async () => {
+    if (requiresPlatformForNotSent(filters, logSearch)) {
+      setError("Select a platform or tenant before filtering Notification Not Sent Users");
+      return;
+    }
+
     try {
       setIsLoading(true);
       setError(null);
       await fetchData(filters, logSearch, 1);
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Failed to fetch notification logs";
-      setError(message);
+      setError(
+        getNotificationLogsErrorMessage(e, "Unable to load notification logs. Please try again."),
+      );
       console.error("Error applying filters:", e);
     } finally {
       setIsLoading(false);
@@ -354,13 +400,19 @@ export default function NotificationLogsPage() {
   }, [filters, logSearch, fetchData]);
 
   const handleApplyLogSearch = useCallback(async () => {
+    if (requiresPlatformForNotSent(filters, logSearch)) {
+      setError("Select a platform or tenant before filtering Notification Not Sent Users");
+      return;
+    }
+
     try {
       setIsLoading(true);
       setError(null);
       await fetchLogs(filters, logSearch, 1);
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Failed to search notification logs";
-      setError(message);
+      setError(
+        getNotificationLogsErrorMessage(e, "Unable to search notification logs. Please try again."),
+      );
     } finally {
       setIsLoading(false);
     }
@@ -373,8 +425,9 @@ export default function NotificationLogsPage() {
       setError(null);
       await fetchLogs(filters, logSearch, newPage);
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Failed to fetch notification logs";
-      setError(message);
+      setError(
+        getNotificationLogsErrorMessage(e, "Unable to load notification logs. Please try again."),
+      );
     } finally {
       setIsLoading(false);
     }
@@ -382,6 +435,33 @@ export default function NotificationLogsPage() {
 
   const handleLogSearchChange = (key: keyof LogSearchState, value: string) => {
     setLogSearch((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleNotificationStatusChange = async (value: string) => {
+    if (value === "not_sent" && !filters.platform && !filters.tenant && !filters.user) {
+      setLogSearch((prev) => ({ ...prev, notificationStatus: value, groupBy: "none" }));
+      setError("Select a platform or tenant before filtering Notification Not Sent Users");
+      return;
+    }
+
+    const nextLogSearch = {
+      ...logSearch,
+      notificationStatus: value,
+      groupBy: value === "not_sent" ? "none" : logSearch.groupBy,
+    };
+    setLogSearch(nextLogSearch);
+
+    try {
+      setIsLoading(true);
+      setError(null);
+      await fetchLogs(filters, nextLogSearch, 1);
+    } catch (e) {
+      setError(
+        getNotificationLogsErrorMessage(e, "Unable to search notification logs. Please try again."),
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const groupByLabel =
@@ -438,7 +518,8 @@ export default function NotificationLogsPage() {
                 label="Tenant"
                 options={organisationOptions.map((org) => ({
                   value: org._id,
-                  label: org.name,
+                  label: org.inactive ? `${org.name} (Inactive)` : org.name,
+                  disabled: Boolean(org.inactive),
                 }))}
                 value={filters.tenant}
                 onChange={(value) => handleFilterChange("tenant", value)}
@@ -517,7 +598,7 @@ export default function NotificationLogsPage() {
               {coverage && (
                 <>
                   <KPITile
-                    title="Total Users (in scope)"
+                    title="Total Users (created by end date)"
                     value={coverage.consolidated.totalEligibleUsers.toLocaleString()}
                   />
                   <KPITile
@@ -690,12 +771,21 @@ export default function NotificationLogsPage() {
                   onChange={(e) => handleLogSearchChange("searchMessageType", e.target.value)}
                 />
                 <SearchableSelect
+                  label="User Notification Status"
+                  options={USER_NOTIFICATION_STATUS_OPTIONS}
+                  value={logSearch.notificationStatus}
+                  onChange={handleNotificationStatusChange}
+                  placeholder="Select status..."
+                  emptyMessage="No options"
+                />
+                <SearchableSelect
                   label="Group By"
                   options={GROUP_BY_OPTIONS}
                   value={logSearch.groupBy}
                   onChange={(value) => handleLogSearchChange("groupBy", value)}
                   placeholder="Select grouping..."
                   emptyMessage="No options"
+                  disabled={logSearch.notificationStatus === "not_sent"}
                 />
               </div>
               <div className="flex justify-end">
@@ -705,7 +795,38 @@ export default function NotificationLogsPage() {
               </div>
             </div>
 
-            {logsView === "grouped" ? (
+            {logsView === "notNotifiedUsers" ? (
+              usersNotNotified.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  No users without notifications for selected filters.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-left text-gray-600">
+                        <th className="pb-2 pr-4 font-medium">Employee ID</th>
+                        <th className="pb-2 pr-4 font-medium">Email</th>
+                        <th className="pb-2 pr-4 font-medium">Organization ID</th>
+                        <th className="pb-2 font-medium">Created At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usersNotNotified.map((user) => (
+                        <tr key={user.employeeId} className="border-b border-gray-100">
+                          <td className="py-2 pr-4 text-gray-900">{user.employeeId}</td>
+                          <td className="py-2 pr-4 text-gray-900">{user.email || "—"}</td>
+                          <td className="py-2 pr-4 text-gray-900">{user.organizationId || "—"}</td>
+                          <td className="py-2 text-gray-900">
+                            {user.createdAt ? new Date(user.createdAt).toLocaleString() : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            ) : logsView === "grouped" ? (
               groups.length === 0 ? (
                 <p className="text-sm text-gray-500">No grouped results for selected filters.</p>
               ) : (

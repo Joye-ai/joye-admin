@@ -25,9 +25,16 @@ const makeApiRequest = async <T = unknown>(
 
   const response = await fetch(url, config);
   if (!response.ok) {
-    throw new Error(
-      `API ${config.method || "GET"} ${url} failed: ${response.status} ${response.statusText}`,
-    );
+    let message = `Request failed (${response.status})`;
+    try {
+      const data = (await response.json()) as { message?: string };
+      if (data?.message && typeof data.message === "string") {
+        message = data.message;
+      }
+    } catch {
+      // keep fallback message
+    }
+    throw new Error(message);
   }
   try {
     return (await response.json()) as T;
@@ -254,10 +261,18 @@ export function createApiClient(baseUrl: string, defaultHeaders?: HeadersInit) {
       ...options,
     };
     const res = await fetch(url, config);
-    if (!res.ok)
-      throw new Error(
-        `API ${config.method || "GET"} ${url} failed: ${res.status} ${res.statusText}`,
-      );
+    if (!res.ok) {
+      let message = `Request failed (${res.status})`;
+      try {
+        const data = (await res.json()) as { message?: string };
+        if (data?.message && typeof data.message === "string") {
+          message = data.message;
+        }
+      } catch {
+        // keep fallback message
+      }
+      throw new Error(message);
+    }
     try {
       return (await res.json()) as T;
     } catch (e) {

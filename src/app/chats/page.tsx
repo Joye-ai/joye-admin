@@ -101,9 +101,9 @@ export default function ChatsPage() {
     dateRange: getCurrentWeekRange(),
   });
   const [platformOptions, setPlatformOptions] = useState<{ key: string; name: string }[]>([]);
-  const [organisationOptions, setOrganisationOptions] = useState<{ _id: string; name: string }[]>(
-    [],
-  );
+  const [organisationOptions, setOrganisationOptions] = useState<
+    { _id: string; name: string; inactive?: boolean }[]
+  >([]);
   const [userOptions, setUserOptions] = useState<{ id: string; name: string }[]>([]);
   const [chatData, setChatData] = useState<ChatResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -251,7 +251,7 @@ export default function ChatsPage() {
   const fetchOrganisations = async (platformKey: string) => {
     if (!platformKey) return;
     try {
-      const response = await get<{ _id: string; name: string }[]>(
+      const response = await get<{ _id: string; name: string; inactive?: boolean }[]>(
         `/admin/organization/${platformKey}`,
       );
 
@@ -259,6 +259,7 @@ export default function ChatsPage() {
         const mapped = response.map((org) => ({
           _id: org._id,
           name: org.name,
+          inactive: Boolean(org.inactive),
         }));
         setOrganisationOptions(mapped);
       }
@@ -473,7 +474,8 @@ export default function ChatsPage() {
                   label="Tenant"
                   options={organisationOptions.map((org) => ({
                     value: org._id,
-                    label: org.name,
+                    label: org.inactive ? `${org.name} (Inactive)` : org.name,
+                    disabled: Boolean(org.inactive),
                   }))}
                   value={filters.tenant}
                   onChange={(value) => handleFilterChange("tenant", value)}
