@@ -505,11 +505,11 @@ export default function NotificationLogsPage() {
               {analytics && (
                 <>
                   <KPITile
-                    title="Total Notifications"
+                    title="Total Notifications Sent"
                     value={analytics.consolidated.totalNotifications.toLocaleString()}
                   />
                   <KPITile
-                    title="Users Notified"
+                    title="Unique Users Notified"
                     value={analytics.consolidated.uniqueUsers.toLocaleString()}
                   />
                 </>
@@ -535,39 +535,63 @@ export default function NotificationLogsPage() {
                   <CardTitle>By Tenant</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-gray-200 text-left text-gray-600">
-                          <th className="pb-2 pr-4 font-medium">Tenant</th>
-                          <th className="pb-2 pr-4 font-medium">TID</th>
-                          <th className="pb-2 pr-4 font-medium text-right">Total Users</th>
-                          <th className="pb-2 pr-4 font-medium text-right">Notified</th>
-                          <th className="pb-2 pr-4 font-medium text-right">Not Notified</th>
-                          <th className="pb-2 font-medium text-right">Coverage</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {coverage.byTenant.map((row) => (
-                          <tr key={row.organizationId} className="border-b border-gray-100">
-                            <td className="py-2 pr-4 text-gray-900">{row.tenantName}</td>
-                            <td className="py-2 pr-4 text-gray-900">{row.tId}</td>
-                            <td className="py-2 pr-4 text-right text-gray-900">
-                              {row.totalUsers.toLocaleString()}
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <div className="max-h-96 overflow-y-auto">
+                      <table className="min-w-full border-separate border-spacing-0 text-sm">
+                        <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(229,231,235)]">
+                          <tr className="text-left text-gray-600">
+                            <th className="bg-white px-4 py-3 font-medium">Tenant</th>
+                            <th className="bg-white px-4 py-3 font-medium">TID</th>
+                            <th className="bg-white px-4 py-3 text-right font-medium">
+                              Total Users
+                            </th>
+                            <th className="bg-white px-4 py-3 text-right font-medium">Notified</th>
+                            <th className="bg-white px-4 py-3 text-right font-medium">
+                              Not Notified
+                            </th>
+                            <th className="bg-white px-4 py-3 text-right font-medium">Coverage</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {coverage.byTenant.map((row) => (
+                            <tr key={row.organizationId} className="border-b border-gray-100">
+                              <td className="px-4 py-2 text-gray-900">{row.tenantName}</td>
+                              <td className="px-4 py-2 text-gray-900">{row.tId}</td>
+                              <td className="px-4 py-2 text-right text-gray-900">
+                                {row.totalUsers.toLocaleString()}
+                              </td>
+                              <td className="px-4 py-2 text-right text-gray-900">
+                                {row.notifiedUsers.toLocaleString()}
+                              </td>
+                              <td className="px-4 py-2 text-right text-gray-900">
+                                {row.usersNotNotified.toLocaleString()}
+                              </td>
+                              <td className="px-4 py-2 text-right text-gray-900">
+                                {row.coveragePercent}%
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="sticky bottom-0 z-10 bg-gray-50 shadow-[0_-1px_0_0_rgb(229,231,235)]">
+                          <tr className="font-semibold text-gray-900">
+                            <td className="bg-gray-50 px-4 py-3">Total</td>
+                            <td className="bg-gray-50 px-4 py-3">—</td>
+                            <td className="bg-gray-50 px-4 py-3 text-right">
+                              {coverage.consolidated.totalEligibleUsers.toLocaleString()}
                             </td>
-                            <td className="py-2 pr-4 text-right text-gray-900">
-                              {row.notifiedUsers.toLocaleString()}
+                            <td className="bg-gray-50 px-4 py-3 text-right">
+                              {coverage.consolidated.notifiedUsers.toLocaleString()}
                             </td>
-                            <td className="py-2 pr-4 text-right text-gray-900">
-                              {row.usersNotNotified.toLocaleString()}
+                            <td className="bg-gray-50 px-4 py-3 text-right">
+                              {coverage.consolidated.usersNotNotified.toLocaleString()}
                             </td>
-                            <td className="py-2 text-right text-gray-900">
-                              {row.coveragePercent}%
+                            <td className="bg-gray-50 px-4 py-3 text-right">
+                              {coverage.consolidated.coveragePercent}%
                             </td>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </tfoot>
+                      </table>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
