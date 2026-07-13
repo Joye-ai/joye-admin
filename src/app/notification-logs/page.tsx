@@ -85,6 +85,7 @@ interface TenantCoverage {
   tenantName: string;
   tId: string;
   totalUsers: number;
+  totalNotifications: number;
   notifiedUsers: number;
   usersNotNotified: number;
   coveragePercent: number;
@@ -102,6 +103,7 @@ interface NotificationLogAnalytics {
 interface NotificationLogCoverageAnalytics {
   consolidated: {
     totalEligibleUsers: number;
+    totalNotifications: number;
     notifiedUsers: number;
     usersNotNotified: number;
     coveragePercent: number;
@@ -650,7 +652,7 @@ export default function NotificationLogsPage() {
               {analytics && (
                 <>
                   <KPITile
-                    title="Total Notifications Sent"
+                    title="Total Notification"
                     value={analytics.consolidated.totalNotifications.toLocaleString()}
                   />
                   <KPITile
@@ -690,6 +692,9 @@ export default function NotificationLogsPage() {
                             <th className="bg-white px-4 py-3 text-right font-medium">
                               Total Users
                             </th>
+                            <th className="bg-white px-4 py-3 text-right font-medium">
+                              Total Notification
+                            </th>
                             <th className="bg-white px-4 py-3 text-right font-medium">Notified</th>
                             <th className="bg-white px-4 py-3 text-right font-medium">
                               Not Notified
@@ -704,6 +709,9 @@ export default function NotificationLogsPage() {
                               <td className="px-4 py-2 text-gray-900">{row.tId}</td>
                               <td className="px-4 py-2 text-right text-gray-900">
                                 {row.totalUsers.toLocaleString()}
+                              </td>
+                              <td className="px-4 py-2 text-right text-gray-900">
+                                {(row.totalNotifications ?? 0).toLocaleString()}
                               </td>
                               <td className="px-4 py-2 text-right text-gray-900">
                                 {row.notifiedUsers.toLocaleString()}
@@ -723,6 +731,13 @@ export default function NotificationLogsPage() {
                             <td className="bg-gray-50 px-4 py-3">—</td>
                             <td className="bg-gray-50 px-4 py-3 text-right">
                               {coverage.consolidated.totalEligibleUsers.toLocaleString()}
+                            </td>
+                            <td className="bg-gray-50 px-4 py-3 text-right">
+                              {(
+                                coverage.consolidated.totalNotifications ??
+                                analytics?.consolidated.totalNotifications ??
+                                0
+                              ).toLocaleString()}
                             </td>
                             <td className="bg-gray-50 px-4 py-3 text-right">
                               {coverage.consolidated.notifiedUsers.toLocaleString()}
@@ -865,92 +880,106 @@ export default function NotificationLogsPage() {
                   No users without notifications for selected filters.
                 </p>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200 text-left text-gray-600">
-                        <th className="pb-2 pr-4 font-medium">Employee ID</th>
-                        <th className="pb-2 pr-4 font-medium">Email</th>
-                        <th className="pb-2 pr-4 font-medium">Organization ID</th>
-                        <th className="pb-2 font-medium">Created At</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {usersNotNotified.map((user) => (
-                        <tr key={user.employeeId} className="border-b border-gray-100">
-                          <td className="py-2 pr-4 text-gray-900">{user.employeeId}</td>
-                          <td className="py-2 pr-4 text-gray-900">{user.email || "—"}</td>
-                          <td className="py-2 pr-4 text-gray-900">{user.organizationId || "—"}</td>
-                          <td className="py-2 text-gray-900">
-                            {user.createdAt ? new Date(user.createdAt).toLocaleString() : "—"}
-                          </td>
+                <div className="overflow-x-auto rounded-lg border border-gray-200">
+                  <div className="max-h-96 overflow-y-auto">
+                    <table className="min-w-full border-separate border-spacing-0 text-sm">
+                      <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(229,231,235)]">
+                        <tr className="text-left text-gray-600">
+                          <th className="bg-white px-4 py-3 font-medium">Employee ID</th>
+                          <th className="bg-white px-4 py-3 font-medium">Email</th>
+                          <th className="bg-white px-4 py-3 font-medium">Organization ID</th>
+                          <th className="bg-white px-4 py-3 font-medium">Created At</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {usersNotNotified.map((user) => (
+                          <tr key={user.employeeId} className="border-b border-gray-100">
+                            <td className="px-4 py-2 text-gray-900">{user.employeeId}</td>
+                            <td className="px-4 py-2 text-gray-900">{user.email || "—"}</td>
+                            <td className="px-4 py-2 text-gray-900">
+                              {user.organizationId || "—"}
+                            </td>
+                            <td className="px-4 py-2 text-gray-900">
+                              {user.createdAt ? new Date(user.createdAt).toLocaleString() : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )
             ) : logsView === "grouped" ? (
               groups.length === 0 ? (
                 <p className="text-sm text-gray-500">No grouped results for selected filters.</p>
               ) : (
-                <div className="overflow-x-auto">
+                <div>
                   <p className="mb-3 text-sm text-gray-600">Grouped by: {groupByLabel}</p>
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200 text-left text-gray-600">
-                        <th className="pb-2 pr-4 font-medium">{groupByLabel}</th>
-                        <th className="pb-2 pr-4 font-medium text-right">Count</th>
-                        <th className="pb-2 font-medium text-right">Unique Users</th>
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <div className="max-h-96 overflow-y-auto">
+                      <table className="min-w-full border-separate border-spacing-0 text-sm">
+                        <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(229,231,235)]">
+                          <tr className="text-left text-gray-600">
+                            <th className="bg-white px-4 py-3 font-medium">{groupByLabel}</th>
+                            <th className="bg-white px-4 py-3 text-right font-medium">Count</th>
+                            <th className="bg-white px-4 py-3 text-right font-medium">
+                              Unique Users
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {groups.map((row) => (
+                            <tr key={row.groupKey} className="border-b border-gray-100">
+                              <td className="px-4 py-2 text-gray-900">{row.groupKey || "—"}</td>
+                              <td className="px-4 py-2 text-right text-gray-900">
+                                {row.count.toLocaleString()}
+                              </td>
+                              <td className="px-4 py-2 text-right text-gray-900">
+                                {row.uniqueUsers.toLocaleString()}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )
+            ) : logs.length === 0 ? (
+              <p className="text-sm text-gray-500">No logs found for selected filters.</p>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <div className="max-h-96 overflow-y-auto">
+                  <table className="min-w-full border-separate border-spacing-0 text-sm">
+                    <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(229,231,235)]">
+                      <tr className="text-left text-gray-600">
+                        <th className="bg-white px-4 py-3 font-medium">Employee ID</th>
+                        <th className="bg-white px-4 py-3 font-medium">Date</th>
+                        <th className="bg-white px-4 py-3 font-medium">Message Type</th>
+                        <th className="bg-white px-4 py-3 font-medium">Channel</th>
+                        <th className="bg-white px-4 py-3 font-medium">Platform</th>
+                        <th className="bg-white px-4 py-3 font-medium">Sent At</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {groups.map((row) => (
-                        <tr key={row.groupKey} className="border-b border-gray-100">
-                          <td className="py-2 pr-4 text-gray-900">{row.groupKey || "—"}</td>
-                          <td className="py-2 pr-4 text-right text-gray-900">
-                            {row.count.toLocaleString()}
-                          </td>
-                          <td className="py-2 text-right text-gray-900">
-                            {row.uniqueUsers.toLocaleString()}
+                      {logs.map((log, idx) => (
+                        <tr
+                          key={`${log.employeeId}-${log.sentTime}-${idx}`}
+                          className="border-b border-gray-100"
+                        >
+                          <td className="px-4 py-2 text-gray-900">{log.employeeId}</td>
+                          <td className="px-4 py-2 text-gray-900">{log.date}</td>
+                          <td className="px-4 py-2 text-gray-900">{log.messageType}</td>
+                          <td className="px-4 py-2 text-gray-900">{log.channel}</td>
+                          <td className="px-4 py-2 text-gray-900">{log.platformKey}</td>
+                          <td className="px-4 py-2 text-gray-900">
+                            {formatSentTime(log.sentTime)}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              )
-            ) : logs.length === 0 ? (
-              <p className="text-sm text-gray-500">No logs found for selected filters.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 text-left text-gray-600">
-                      <th className="pb-2 pr-4 font-medium">Employee ID</th>
-                      <th className="pb-2 pr-4 font-medium">Date</th>
-                      <th className="pb-2 pr-4 font-medium">Message Type</th>
-                      <th className="pb-2 pr-4 font-medium">Channel</th>
-                      <th className="pb-2 pr-4 font-medium">Platform</th>
-                      <th className="pb-2 font-medium">Sent At</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {logs.map((log, idx) => (
-                      <tr
-                        key={`${log.employeeId}-${log.sentTime}-${idx}`}
-                        className="border-b border-gray-100"
-                      >
-                        <td className="py-2 pr-4 text-gray-900">{log.employeeId}</td>
-                        <td className="py-2 pr-4 text-gray-900">{log.date}</td>
-                        <td className="py-2 pr-4 text-gray-900">{log.messageType}</td>
-                        <td className="py-2 pr-4 text-gray-900">{log.channel}</td>
-                        <td className="py-2 pr-4 text-gray-900">{log.platformKey}</td>
-                        <td className="py-2 text-gray-900">{formatSentTime(log.sentTime)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               </div>
             )}
 
