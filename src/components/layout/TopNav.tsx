@@ -21,6 +21,7 @@ export function TopNav() {
     { label: "Prompts", href: ROUTES.PROMPTS },
     { label: "Chats", href: ROUTES.CHATS },
     { label: "Notification Logs", href: ROUTES.NOTIFICATION_LOGS },
+    { label: "Teams Card Logs", href: ROUTES.TEAMS_CARD_LOGS },
     { label: "Users", href: ROUTES.USERS },
   ];
 
