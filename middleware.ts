@@ -6,9 +6,14 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const isAuthPage = pathname.startsWith("/login");
-  const isProtected = ["/dashboard", "/prompts", "/users", "/chats", "/notification-logs"].some(
-    (p) => pathname.startsWith(p),
-  );
+  const isProtected = [
+    "/dashboard",
+    "/prompts",
+    "/users",
+    "/chats",
+    "/notification-logs",
+    "/teams-card-logs",
+  ].some((p) => pathname.startsWith(p));
 
   if (!token && isProtected) {
     const url = request.nextUrl.clone();
@@ -37,6 +42,8 @@ export const config = {
     "/chats/:path*",
     "/notification-logs",
     "/notification-logs/:path*",
+    "/teams-card-logs",
+    "/teams-card-logs/:path*",
     "/login",
     "/login/:path*",
   ],
