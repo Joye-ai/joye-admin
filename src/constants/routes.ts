@@ -11,6 +11,7 @@ export const ROUTES = {
   CHATS: "/chats",
   NOTIFICATION_LOGS: "/notification-logs",
   TEAMS_CARD_LOGS: "/teams-card-logs",
+  ORGANIZATION_ANALYTICS: "/organization-analytics",
 } as const;
 
 // Route Groups
@@ -23,5 +24,6 @@ export const ROUTE_GROUPS = {
     ROUTES.CHATS,
     ROUTES.NOTIFICATION_LOGS,
     ROUTES.TEAMS_CARD_LOGS,
+    ROUTES.ORGANIZATION_ANALYTICS,
   ],
 } as const;

@@ -13,6 +13,7 @@ export function middleware(request: NextRequest) {
     "/chats",
     "/notification-logs",
     "/teams-card-logs",
+    "/organization-analytics",
   ].some((p) => pathname.startsWith(p));
 
   if (!token && isProtected) {
@@ -44,6 +45,8 @@ export const config = {
     "/notification-logs/:path*",
     "/teams-card-logs",
     "/teams-card-logs/:path*",
+    "/organization-analytics",
+    "/organization-analytics/:path*",
     "/login",
     "/login/:path*",
   ],

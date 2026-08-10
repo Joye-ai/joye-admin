@@ -22,6 +22,7 @@ export function TopNav() {
     { label: "Chats", href: ROUTES.CHATS },
     { label: "Notification Logs", href: ROUTES.NOTIFICATION_LOGS },
     { label: "Teams Card Logs", href: ROUTES.TEAMS_CARD_LOGS },
+    { label: "Org Analytics", href: ROUTES.ORGANIZATION_ANALYTICS },
     { label: "Users", href: ROUTES.USERS },
   ];
 
