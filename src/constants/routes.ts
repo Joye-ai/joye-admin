@@ -10,6 +10,8 @@ export const ROUTES = {
   USERS: "/users",
   CHATS: "/chats",
   NOTIFICATION_LOGS: "/notification-logs",
+  TEAMS_CARD_LOGS: "/teams-card-logs",
+  ORGANIZATION_ANALYTICS: "/organization-analytics",
   ORG_ANALYTICS: "/org-analytics",
 } as const;
 
@@ -22,6 +24,8 @@ export const ROUTE_GROUPS = {
     ROUTES.PROMPTS,
     ROUTES.CHATS,
     ROUTES.NOTIFICATION_LOGS,
+    ROUTES.TEAMS_CARD_LOGS,
+    ROUTES.ORGANIZATION_ANALYTICS,
     ROUTES.ORG_ANALYTICS,
   ],
 } as const;
