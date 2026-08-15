@@ -41,8 +41,6 @@ export const MultiSelect = ({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const selectableOptions = useMemo(() => options.filter((option) => !option.disabled), [options]);
-
   const filteredOptions = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     if (!term) return options;
@@ -111,15 +109,12 @@ export const MultiSelect = ({
 
   const getDisplayText = () => {
     if (value.length === 0) return placeholder;
-    if (selectableOptions.length > 0 && value.length === selectableOptions.length) {
-      return "All tenants selected";
-    }
     if (value.length === 1) {
       const option = options.find((opt) => opt.value === value[0]);
       if (!option) return value[0];
       return option.secondaryLabel ? `${option.label} · ${option.secondaryLabel}` : option.label;
     }
-    return `${value.length} tenants selected`;
+    return `${value.length} selected`;
   };
 
   const allFilteredSelected =

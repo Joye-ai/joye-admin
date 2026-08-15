@@ -69,14 +69,25 @@ interface OrganizationAnalyticsSummaryRow {
   [key: string]: number | string | null | undefined;
 }
 
+interface OrganizationAnalyticsTenantResult {
+  tId: string;
+  reportBatchId: string;
+  triggered: boolean;
+  selectedWeek: number;
+  records: OrganizationAnalyticsRecord[];
+  summaryRow: OrganizationAnalyticsSummaryRow | null;
+}
+
 interface OrganizationAnalyticsResponse {
   reportBatchId: string;
   triggered: boolean;
   selectedWeek: number;
   weeks: number[];
   months: number[];
+  tIds?: string[];
   records: OrganizationAnalyticsRecord[];
   summaryRow: OrganizationAnalyticsSummaryRow | null;
+  results?: OrganizationAnalyticsTenantResult[];
 }
 
 interface OrgAnalyticsResult {
@@ -87,7 +98,9 @@ interface OrgAnalyticsResult {
   error?: string;
 }
 
-const POLL_INTERVAL_MS = 15000;
+const POLL_INTERVAL_MS = 8000;
+const MAX_WEEKS_WITHOUT_CONFIRM = 4;
+const MAX_TENANTS_WITHOUT_CONFIRM = 2;
 
 const currentYear = new Date().getFullYear();
 
@@ -147,7 +160,8 @@ export default function OrganizationAnalyticsPage() {
   const [platform, setPlatform] = useState("");
   const [tenantIds, setTenantIds] = useState<string[]>([]);
   const [year, setYear] = useState(String(currentYear));
-  const [week, setWeek] = useState("");
+  const [weeks, setWeeks] = useState<string[]>([]);
+  const [showLargeSelectionAlert, setShowLargeSelectionAlert] = useState(false);
 
   const weekOptions = useMemo(() => buildWeekOptions(Number(year) || currentYear), [year]);
 
@@ -327,8 +341,8 @@ export default function OrganizationAnalyticsPage() {
 
   const fetchAnalytics = useCallback(
     async (opts?: { silent?: boolean }) => {
-      if (!platform || selectedOrgs.length === 0 || !year || !week) {
-        setError("Select platform, one or more tenants, year, and week");
+      if (!platform || selectedOrgs.length === 0 || !year || !weeks.length) {
+        setError("Select platform, one or more tenants, year, and at least one week");
         return null;
       }
 
@@ -339,59 +353,44 @@ export default function OrganizationAnalyticsPage() {
       }
 
       try {
-        const settled = await Promise.all(
-          selectedOrgs.map(async (org) => {
-            try {
-              const response = await post<OrganizationAnalyticsResponse>(
-                "/admin/organization-analytics",
-                {
-                  platformKey: platform,
-                  tId: org.tId,
-                  year: Number(year),
-                  week: Number(week),
-                  includeSummary: true,
-                },
-              );
-              return {
-                orgId: org._id,
-                orgName: org.name,
-                tId: org.tId,
-                response,
-              } as OrgAnalyticsResult;
-            } catch (e) {
-              return {
-                orgId: org._id,
-                orgName: org.name,
-                tId: org.tId,
-                response: {
-                  reportBatchId: "",
-                  triggered: false,
-                  selectedWeek: Number(week),
-                  weeks: [],
-                  months: [],
-                  records: [],
-                  summaryRow: null,
-                },
-                error: e instanceof Error ? e.message : "Failed to load analytics",
-              } as OrgAnalyticsResult;
-            }
-          }),
+        const selectedWeeks = weeks.map(Number).sort((a, b) => a - b);
+        const response = await post<OrganizationAnalyticsResponse>(
+          "/admin/organization-analytics",
+          {
+            platformKey: platform,
+            tIds: selectedOrgs.map((org) => org.tId),
+            year: Number(year),
+            weeks: selectedWeeks,
+            includeSummary: true,
+          },
         );
 
         if (requestId !== requestRef.current) return null;
+
+        const byTid = new Map((response.results || []).map((result) => [result.tId, result]));
+        const settled = selectedOrgs.map((org) => {
+          const result = byTid.get(org.tId);
+          const records =
+            result?.records || response.records.filter((record) => record.tId === org.tId);
+          return {
+            orgId: org._id,
+            orgName: org.name,
+            tId: org.tId,
+            response: {
+              reportBatchId: result?.reportBatchId || response.reportBatchId,
+              triggered: result?.triggered ?? response.triggered,
+              selectedWeek: result?.selectedWeek ?? response.selectedWeek,
+              weeks: response.weeks || selectedWeeks,
+              months: response.months || [],
+              records,
+              summaryRow:
+                result?.summaryRow ?? (selectedOrgs.length === 1 ? response.summaryRow : null),
+            },
+          } as OrgAnalyticsResult;
+        });
+
         setResults(settled);
-
-        const failures = settled.filter((r) => r.error);
-        if (failures.length && failures.length === settled.length) {
-          setError(failures.map((f) => `${f.orgName}: ${f.error}`).join("; "));
-        } else if (failures.length) {
-          setError(
-            `Some tenants failed: ${failures.map((f) => `${f.orgName}: ${f.error}`).join("; ")}`,
-          );
-        } else if (!opts?.silent) {
-          setError("");
-        }
-
+        if (!opts?.silent) setError("");
         return settled;
       } catch (e) {
         if (requestId !== requestRef.current) return null;
@@ -404,7 +403,7 @@ export default function OrganizationAnalyticsPage() {
         }
       }
     },
-    [platform, selectedOrgs, year, week],
+    [platform, selectedOrgs, year, weeks],
   );
 
   const startPolling = useCallback(() => {
@@ -422,7 +421,10 @@ export default function OrganizationAnalyticsPage() {
     }, POLL_INTERVAL_MS);
   }, [fetchAnalytics, stopPolling]);
 
-  const handleLoad = async () => {
+  const needsLargeSelectionConfirm =
+    weeks.length > MAX_WEEKS_WITHOUT_CONFIRM || tenantIds.length > MAX_TENANTS_WITHOUT_CONFIRM;
+
+  const runLoad = async () => {
     stopPolling();
     setTableOrgFilter("");
     setTableTidFilter("");
@@ -435,6 +437,23 @@ export default function OrganizationAnalyticsPage() {
     if (stillProcessing) {
       startPolling();
     }
+  };
+
+  const handleLoad = async () => {
+    if (!platform || selectedOrgs.length === 0 || !year || !weeks.length) {
+      setError("Select platform, one or more tenants, year, and at least one week");
+      return;
+    }
+    if (needsLargeSelectionConfirm) {
+      setShowLargeSelectionAlert(true);
+      return;
+    }
+    await runLoad();
+  };
+
+  const handleConfirmLargeSelection = async () => {
+    setShowLargeSelectionAlert(false);
+    await runLoad();
   };
 
   useEffect(() => {
@@ -550,7 +569,10 @@ export default function OrganizationAnalyticsPage() {
   }, [results, scopeWeeks, scopeMonths]);
 
   return (
-    <Layout title="Org Analytics">
+    <Layout
+      title="Org Analytics"
+      subtitle="Generate missing data for your selection, or show cached results if already generated"
+    >
       <div className="space-y-6">
         <Card>
           <CardHeader>
@@ -577,6 +599,8 @@ export default function OrganizationAnalyticsPage() {
                 searchPlaceholder="Search by org name or tId..."
                 emptyMessage="No tenants found"
                 disabled={organisationOptions.length === 0}
+                allowSelectAll={false}
+                searchable
               />
 
               <SearchableSelect
@@ -586,26 +610,32 @@ export default function OrganizationAnalyticsPage() {
                 onChange={(value) => {
                   setYear(value);
                   const maxWeek = Number(value) === currentYear ? currentIsoWeek : 52;
-                  if (week && Number(week) > maxWeek) {
-                    setWeek("");
-                  }
+                  setWeeks((prev) => prev.filter((selected) => Number(selected) <= maxWeek));
                 }}
                 placeholder="Select Year"
               />
 
-              <SearchableSelect
-                label="Through Week"
+              <MultiSelect
+                label="Weeks"
                 options={weekOptions}
-                value={week}
-                onChange={setWeek}
-                placeholder="Select Week"
+                value={weeks}
+                onChange={setWeeks}
+                placeholder="Select one or more weeks"
+                searchPlaceholder="Search weeks..."
+                emptyMessage="No weeks found"
+                allowSelectAll={false}
+                searchable
               />
             </div>
+            <p className="mt-4 text-xs text-gray-500">
+              Generates weeks, overlapping months, and a summary for the tenants and weeks you
+              selected. Already completed periods are reused from cache and are not recalculated.
+            </p>
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <Button
                 onClick={handleLoad}
-                disabled={loading || !platform || tenantIds.length === 0 || !week}
+                disabled={loading || !platform || tenantIds.length === 0 || weeks.length === 0}
                 loading={loading}
               >
                 {loading ? "Loading..." : "Load / Generate"}
@@ -636,8 +666,8 @@ export default function OrganizationAnalyticsPage() {
           <>
             <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600">
               <span>
-                Scope: weeks 1–{week || "—"}, months{" "}
-                {scopeMonths.length ? `1–${scopeMonths[scopeMonths.length - 1]}` : "—"}
+                Scope: weeks {scopeWeeks.length ? scopeWeeks.join(", ") : "—"}, months{" "}
+                {scopeMonths.length ? scopeMonths.join(", ") : "—"}
               </span>
               <span>
                 Triggered:{" "}
@@ -945,6 +975,55 @@ export default function OrganizationAnalyticsPage() {
           </>
         )}
       </div>
+
+      {showLargeSelectionAlert && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setShowLargeSelectionAlert(false)}
+          />
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="large-selection-title"
+            className="relative z-10 w-full max-w-md rounded-lg bg-white p-6 shadow-xl"
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-amber-100">
+                <svg className="h-5 w-5 text-amber-600" viewBox="0 0 20 20" fill="currentColor">
+                  <path
+                    fillRule="evenodd"
+                    d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </div>
+              <div>
+                <h3 id="large-selection-title" className="text-lg font-semibold text-gray-900">
+                  Large selection
+                </h3>
+                <p className="mt-2 text-sm text-gray-600">
+                  You selected {tenantIds.length} tenant
+                  {tenantIds.length === 1 ? "" : "s"} and {weeks.length} week
+                  {weeks.length === 1 ? "" : "s"}. That can create {tenantIds.length * weeks.length}{" "}
+                  week jobs, plus overlapping months and a summary.
+                </p>
+                <p className="mt-2 text-sm text-gray-600">
+                  Missing periods will be generated. Completed periods are reused from cache.
+                </p>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setShowLargeSelectionAlert(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleConfirmLargeSelection} loading={loading}>
+                Continue
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }
