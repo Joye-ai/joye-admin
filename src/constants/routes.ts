@@ -10,10 +10,18 @@ export const ROUTES = {
   USERS: "/users",
   CHATS: "/chats",
   NOTIFICATION_LOGS: "/notification-logs",
+  ORG_ANALYTICS: "/org-analytics",
 } as const;
 
 // Route Groups
 export const ROUTE_GROUPS = {
   PUBLIC: [ROUTES.LOGIN],
-  PROTECTED: [ROUTES.HOME, ROUTES.USERS, ROUTES.PROMPTS, ROUTES.CHATS, ROUTES.NOTIFICATION_LOGS],
+  PROTECTED: [
+    ROUTES.HOME,
+    ROUTES.USERS,
+    ROUTES.PROMPTS,
+    ROUTES.CHATS,
+    ROUTES.NOTIFICATION_LOGS,
+    ROUTES.ORG_ANALYTICS,
+  ],
 } as const;
