@@ -184,7 +184,13 @@ export const MultiSelect = ({
                       className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
                     <span className="ml-3 text-sm text-gray-900 font-medium text-left">
-                      {searchTerm.trim() ? "Select all filtered" : "Select All"}
+                      {searchTerm.trim()
+                        ? allFilteredSelected
+                          ? "Deselect all filtered"
+                          : "Select all filtered"
+                        : allFilteredSelected
+                          ? "Deselect All"
+                          : "Select All"}
                     </span>
                   </label>
                   <div className="border-t border-gray-200"></div>

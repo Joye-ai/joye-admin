@@ -599,7 +599,7 @@ export default function OrganizationAnalyticsPage() {
                 searchPlaceholder="Search by org name or tId..."
                 emptyMessage="No tenants found"
                 disabled={organisationOptions.length === 0}
-                allowSelectAll={false}
+                allowSelectAll
                 searchable
               />
 
