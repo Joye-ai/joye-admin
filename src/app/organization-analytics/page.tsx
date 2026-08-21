@@ -151,6 +151,98 @@ const PERCENT_COLUMN_KEYS = new Set(["activePercent", "repeatPercent"]);
 const formatPercent = (value?: number | null) =>
   value == null || Number.isNaN(Number(value)) ? "—" : `${Math.trunc(Number(value))}%`;
 
+const COLUMN_INFO: Record<string, string> = {
+  orgName: "Organization name for the selected tenant.",
+  tId: "Tenant identifier (tId) used to scope analytics for this organization.",
+  status: "Job status for this period: pending, processing, complete, or failed.",
+  week: "ISO week number for this row’s date range.",
+  month: "Calendar month number (1–12) for this row’s date range.",
+  registeredUsers:
+    "Users whose createTimestamp is on or before the period end date (cumulative registrations through period end).",
+  activeUsers:
+    "Users with Total Activities > 0 in this period’s date range (same rule as report-users).",
+  repeatUsers: "Users who were active on more than one distinct day in this period’s date range.",
+  totalActivity:
+    "Sum of all counted activities in this period (brews, chats, page views, goals, trainings, happiness goals, etc.).",
+  detailedRowsCount:
+    "Count of detail rows contributed by users (one per resilience-index date, or 1 if none).",
+  activePercent: "Active Users ÷ Registered Users × 100.",
+  repeatPercent: "Repeat Users ÷ Active Users × 100.",
+  activityPerUser: "(Total Activity − Active Users) ÷ Repeat Users.",
+  progress: "Users processed so far out of total users while this period is generating.",
+};
+
+const columnInfoText = (key: string, label: string) => {
+  if (COLUMN_INFO[key]) return COLUMN_INFO[key];
+  const weekMatch = /^w(\d+) Active$/.exec(key);
+  if (weekMatch) {
+    return `Active users (at least one counted activity) during ISO week ${weekMatch[1]}.`;
+  }
+  const monthMatch = /^m(\d+) Active$/.exec(key);
+  if (monthMatch) {
+    return `Active users (at least one counted activity) during calendar month ${monthMatch[1]}.`;
+  }
+  return `How ${label} is calculated.`;
+};
+
+function HeaderWithInfo({ label, infoKey }: { label: string; infoKey: string }) {
+  return (
+    <span className="inline-flex items-center">
+      {label}
+      <ColumnInfoIcon info={columnInfoText(infoKey, label)} />
+    </span>
+  );
+}
+
+function ColumnInfoIcon({ info }: { info: string }) {
+  const [tip, setTip] = useState<{ top: number; left: number } | null>(null);
+
+  return (
+    <span className="relative ml-1 inline-flex align-middle">
+      <button
+        type="button"
+        className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-current/40 text-[9px] font-bold leading-none opacity-60 hover:opacity-100 focus:opacity-100 focus:outline-none"
+        aria-label={info}
+        onMouseEnter={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const width = 224;
+          const padding = 8;
+          const centerX = rect.left + rect.width / 2;
+          const left = Math.min(
+            Math.max(centerX, padding + width / 2),
+            window.innerWidth - padding - width / 2,
+          );
+          setTip({ top: rect.bottom + 6, left });
+        }}
+        onMouseLeave={() => setTip(null)}
+        onFocus={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const width = 224;
+          const padding = 8;
+          const centerX = rect.left + rect.width / 2;
+          const left = Math.min(
+            Math.max(centerX, padding + width / 2),
+            window.innerWidth - padding - width / 2,
+          );
+          setTip({ top: rect.bottom + 6, left });
+        }}
+        onBlur={() => setTip(null)}
+      >
+        i
+      </button>
+      {tip && (
+        <span
+          role="tooltip"
+          className="pointer-events-none fixed z-[100] w-56 -translate-x-1/2 whitespace-normal break-words rounded-md bg-gray-900 px-2.5 py-1.5 text-left text-[11px] font-normal normal-case leading-snug text-white shadow-lg"
+          style={{ top: tip.top, left: tip.left }}
+        >
+          {info}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export default function OrganizationAnalyticsPage() {
   const router = useRouter();
   const { isAuthenticated } = useAppSelector((state) => state.auth);
@@ -286,13 +378,30 @@ export default function OrganizationAnalyticsPage() {
     const weekNum = tableWeekFilter ? Number(tableWeekFilter) : null;
     const monthFromWeek =
       weekNum != null ? monthForIsoWeek(Number(year) || currentYear, weekNum) : null;
-    return allRecords
-      .filter((r) => r.periodType === "month")
-      .filter((r) => !tableOrgFilter || r.orgName === tableOrgFilter)
-      .filter((r) => !tableTidFilter || r.tId === tableTidFilter)
-      .filter((r) => monthFromWeek == null || r.month === monthFromWeek)
-      .sort((a, b) => a.orgName.localeCompare(b.orgName) || (a.month || 0) - (b.month || 0));
-  }, [allRecords, tableOrgFilter, tableTidFilter, tableWeekFilter, monthForIsoWeek, year]);
+    const selectedYear = Number(year) || currentYear;
+    return (
+      allRecords
+        .filter((r) => r.periodType === "month")
+        // Only months belonging to the selected year (API months list + date prefix).
+        .filter(
+          (r) => scopeMonths.length === 0 || (r.month != null && scopeMonths.includes(r.month)),
+        )
+        .filter((r) => !r.reportStartDate || r.reportStartDate.startsWith(`${selectedYear}-`))
+        .filter((r) => !tableOrgFilter || r.orgName === tableOrgFilter)
+        .filter((r) => !tableTidFilter || r.tId === tableTidFilter)
+        .filter((r) => monthFromWeek == null || r.month === monthFromWeek)
+        .sort((a, b) => a.orgName.localeCompare(b.orgName) || (a.month || 0) - (b.month || 0))
+    );
+  }, [
+    allRecords,
+    tableOrgFilter,
+    tableTidFilter,
+    tableWeekFilter,
+    monthForIsoWeek,
+    year,
+    currentYear,
+    scopeMonths,
+  ]);
 
   const showWeekProgressColumn = useMemo(
     () => weekRecords.some((r) => r.status !== "complete"),
@@ -623,7 +732,7 @@ export default function OrganizationAnalyticsPage() {
                 placeholder="Select one or more weeks"
                 searchPlaceholder="Search weeks..."
                 emptyMessage="No weeks found"
-                allowSelectAll={false}
+                allowSelectAll
                 searchable
               />
             </div>
@@ -685,7 +794,7 @@ export default function OrganizationAnalyticsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Summary (report-users Summary sheet)</CardTitle>
+                <CardTitle>Current Summary</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">
@@ -697,7 +806,10 @@ export default function OrganizationAnalyticsPage() {
                             key={col.key}
                             className={`whitespace-nowrap px-3 py-2 text-left text-xs font-semibold ${headerClass(col.group)}`}
                           >
-                            {col.label}
+                            <span className="inline-flex items-center">
+                              {col.label}
+                              <ColumnInfoIcon info={columnInfoText(col.key, col.label)} />
+                            </span>
                           </th>
                         ))}
                       </tr>
@@ -803,23 +915,41 @@ export default function OrganizationAnalyticsPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Week records (week set, month=null)</CardTitle>
+                  <CardTitle>Week records</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="overflow-x-auto max-h-80">
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
                       <thead className="bg-gray-50 sticky top-0">
                         <tr>
-                          <th className="px-3 py-2 text-left">Organization</th>
-                          <th className="px-3 py-2 text-left">tId</th>
-                          <th className="px-3 py-2 text-left">Week</th>
-                          <th className="px-3 py-2 text-left">Status</th>
-                          <th className="px-3 py-2 text-left">Registered</th>
-                          <th className="px-3 py-2 text-left">Active</th>
-                          <th className="px-3 py-2 text-left">Repeat</th>
-                          <th className="px-3 py-2 text-left">Total Activity</th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="Organization" infoKey="orgName" />
+                          </th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="tId" infoKey="tId" />
+                          </th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="Week" infoKey="week" />
+                          </th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="Status" infoKey="status" />
+                          </th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="Registered" infoKey="registeredUsers" />
+                          </th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="Active" infoKey="activeUsers" />
+                          </th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="Repeat" infoKey="repeatUsers" />
+                          </th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="Total Activity" infoKey="totalActivity" />
+                          </th>
                           {showWeekProgressColumn && (
-                            <th className="px-3 py-2 text-left">Progress</th>
+                            <th className="px-3 py-2 text-left">
+                              <HeaderWithInfo label="Progress" infoKey="progress" />
+                            </th>
                           )}
                         </tr>
                       </thead>
@@ -908,21 +1038,37 @@ export default function OrganizationAnalyticsPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Month records (week=null, month set)</CardTitle>
+                  <CardTitle>Month records</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="overflow-x-auto max-h-80">
                     <table className="min-w-full divide-y divide-gray-200 text-sm">
                       <thead className="bg-gray-50 sticky top-0">
                         <tr>
-                          <th className="px-3 py-2 text-left">Organization</th>
-                          <th className="px-3 py-2 text-left">tId</th>
-                          <th className="px-3 py-2 text-left">Month</th>
-                          <th className="px-3 py-2 text-left">Status</th>
-                          <th className="px-3 py-2 text-left">Registered</th>
-                          <th className="px-3 py-2 text-left">Active</th>
-                          <th className="px-3 py-2 text-left">Repeat</th>
-                          <th className="px-3 py-2 text-left">Total Activity</th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="Organization" infoKey="orgName" />
+                          </th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="tId" infoKey="tId" />
+                          </th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="Month" infoKey="month" />
+                          </th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="Status" infoKey="status" />
+                          </th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="Registered" infoKey="registeredUsers" />
+                          </th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="Active" infoKey="activeUsers" />
+                          </th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="Repeat" infoKey="repeatUsers" />
+                          </th>
+                          <th className="px-3 py-2 text-left">
+                            <HeaderWithInfo label="Total Activity" infoKey="totalActivity" />
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
