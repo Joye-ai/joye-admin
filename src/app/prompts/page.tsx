@@ -20,13 +20,12 @@ type PromptRow = {
 const CATEGORY_OPTIONS = [
   { label: "Brew", value: "brew" },
   { label: "Mindful Minute", value: "mindful-minute" },
-  { label: "Quick JL", value: "quick-jl" },
   { label: "BYB", value: "byb" },
   { label: "Inclusion", value: "inclusion" },
   { label: "Jumpstart", value: "jumpstart" },
+  { label: "Transformation", value: "transformation" },
   { label: "Make Today Great", value: "today-great" },
   { label: "Monday Insights", value: "monday-insights" },
-  { label: "Daily Suggestions", value: "daily-suggestions" },
 ] as const;
 
 export default function PromptsPage() {
