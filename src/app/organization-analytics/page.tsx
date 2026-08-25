@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { Layout } from "@/components/layout";
+import { OrgAnalyticsExportButton } from "@/components/organization-analytics/OrgAnalyticsExportButton";
 import {
   Button,
   Card,
@@ -18,6 +19,7 @@ import { ROUTES } from "@/constants";
 import { get, post } from "@/helpers/api";
 import { useAppSelector } from "@/store";
 import { chunk } from "@/utils/array";
+import type { OrganizationAnalyticsExcelInput } from "@/utils/organizationAnalyticsExcel";
 
 type AnalyticsStatus = "pending" | "processing" | "complete" | "failed";
 
@@ -806,6 +808,74 @@ export default function OrganizationAnalyticsPage() {
     return totals;
   }, [results, scopeWeeks, scopeMonths]);
 
+  const exportWeekRows = useMemo(
+    () =>
+      allRecords
+        .filter((r) => r.periodType === "week")
+        .sort((a, b) => a.orgName.localeCompare(b.orgName) || (a.week || 0) - (b.week || 0))
+        .map((r) => ({
+          orgName: r.orgName,
+          tId: r.tId,
+          period: r.week,
+          status: r.status,
+          registeredUsers: r.registeredUsers,
+          activeUsers: r.activeUsersInPeriod ?? r.activeUsers,
+          repeatUsers: r.repeatUsers,
+          totalActivity: r.totalActivity,
+        })),
+    [allRecords],
+  );
+
+  const exportMonthRows = useMemo(() => {
+    const selectedYear = Number(year) || currentYear;
+    return allRecords
+      .filter((r) => r.periodType === "month")
+      .filter((r) => scopeMonths.length === 0 || (r.month != null && scopeMonths.includes(r.month)))
+      .filter((r) => !r.reportStartDate || r.reportStartDate.startsWith(`${selectedYear}-`))
+      .sort((a, b) => a.orgName.localeCompare(b.orgName) || (a.month || 0) - (b.month || 0))
+      .map((r) => ({
+        orgName: r.orgName,
+        tId: r.tId,
+        period: r.month,
+        status: r.status,
+        registeredUsers: r.registeredUsers,
+        activeUsers: r.activeUsersInPeriod ?? r.activeUsers,
+        repeatUsers: r.repeatUsers,
+        totalActivity: r.totalActivity,
+      }));
+  }, [allRecords, scopeMonths, year]);
+
+  const getExcelExportPayload = useCallback((): OrganizationAnalyticsExcelInput => {
+    const summaryRows = results.map((result) => {
+      const row: Record<string, string | number | null | undefined> = {};
+      for (const col of spreadsheetColumns) {
+        row[col.key] = rowValue(result, col.key) as string | number | null | undefined;
+      }
+      return row;
+    });
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    return {
+      fileName: `org-analytics-${platform || "export"}-${year || currentYear}-${stamp}.xlsx`,
+      summaryColumns: spreadsheetColumns,
+      summaryRows,
+      summaryTotals: summaryTotalsRow,
+      weekRows: exportWeekRows,
+      monthRows: exportMonthRows,
+    };
+  }, [
+    results,
+    spreadsheetColumns,
+    summaryTotalsRow,
+    exportWeekRows,
+    exportMonthRows,
+    platform,
+    year,
+  ]);
+
+  const handleExportError = useCallback((message: string) => {
+    setError(message);
+  }, []);
+
   return (
     <Layout
       title="Org Analytics"
@@ -916,7 +986,15 @@ export default function OrganizationAnalyticsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Current Summary</CardTitle>
+                <div className="flex items-center justify-between gap-4">
+                  <CardTitle>Current Summary</CardTitle>
+                  {!isGenerating && results.length > 0 && (
+                    <OrgAnalyticsExportButton
+                      getPayload={getExcelExportPayload}
+                      onError={handleExportError}
+                    />
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="max-h-96 overflow-auto">
