@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { Layout } from "@/components/layout";
 import {
@@ -17,6 +17,7 @@ import {
 import { ROUTES } from "@/constants";
 import { get, post } from "@/helpers/api";
 import { useAppSelector } from "@/store";
+import { chunk } from "@/utils/array";
 
 type AnalyticsStatus = "pending" | "processing" | "complete" | "failed";
 
@@ -101,6 +102,8 @@ interface OrgAnalyticsResult {
 const POLL_INTERVAL_MS = 8000;
 const MAX_WEEKS_WITHOUT_CONFIRM = 4;
 const MAX_TENANTS_WITHOUT_CONFIRM = 2;
+/** Smaller POSTs avoid 4+ minute timeouts when Select All is used. */
+const TENANT_BATCH_SIZE = 15;
 
 const currentYear = new Date().getFullYear();
 
@@ -129,10 +132,24 @@ const buildWeekOptions = (selectedYear: number) => {
   });
 };
 
-const statusClass = (status: AnalyticsStatus) => {
+const isBusyStatus = (status?: string | null) => status === "processing" || status === "pending";
+
+const busyTenantIds = (data: OrgAnalyticsResult[]) =>
+  data.filter((r) => r.response.records.some((rec) => isBusyStatus(rec.status))).map((r) => r.tId);
+
+const stillGeneratingFromResults = (data: OrgAnalyticsResult[]) => busyTenantIds(data).length > 0;
+
+const displayStatusLabel = (status?: string | null, forceGenerating = false) => {
+  if (status === "failed") return "failed";
+  if (forceGenerating || isBusyStatus(status)) return "generating";
+  return status || "—";
+};
+
+const statusClass = (status: string) => {
   switch (status) {
     case "complete":
       return "bg-green-100 text-green-800";
+    case "generating":
     case "processing":
     case "pending":
       return "bg-[#1f00a3]/10 text-[#1f00a3]";
@@ -143,6 +160,18 @@ const statusClass = (status: AnalyticsStatus) => {
   }
 };
 
+const renderStatusBadge = (status?: string | null, forceGenerating = false) => {
+  const label = displayStatusLabel(status, forceGenerating);
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${statusClass(label)}`}
+    >
+      {label === "generating" && <Loader size="sm" variant="primary" inline />}
+      {label}
+    </span>
+  );
+};
+
 const formatNumber = (value?: number | null) =>
   value == null || Number.isNaN(Number(value)) ? "—" : Number(value).toLocaleString();
 
@@ -151,10 +180,36 @@ const PERCENT_COLUMN_KEYS = new Set(["activePercent", "repeatPercent"]);
 const formatPercent = (value?: number | null) =>
   value == null || Number.isNaN(Number(value)) ? "—" : `${Math.trunc(Number(value))}%`;
 
+const mapAnalyticsResponse = (
+  orgs: OrganizationOption[],
+  response: OrganizationAnalyticsResponse,
+  selectedWeeks: number[],
+): OrgAnalyticsResult[] => {
+  const byTid = new Map((response.results || []).map((result) => [result.tId, result]));
+  return orgs.map((org) => {
+    const result = byTid.get(org.tId);
+    const records = result?.records || response.records.filter((record) => record.tId === org.tId);
+    return {
+      orgId: org._id,
+      orgName: org.name,
+      tId: org.tId,
+      response: {
+        reportBatchId: result?.reportBatchId || response.reportBatchId,
+        triggered: result?.triggered ?? response.triggered,
+        selectedWeek: result?.selectedWeek ?? response.selectedWeek,
+        weeks: response.weeks || selectedWeeks,
+        months: response.months || [],
+        records,
+        summaryRow: result?.summaryRow ?? (orgs.length === 1 ? response.summaryRow : null),
+      },
+    } as OrgAnalyticsResult;
+  });
+};
+
 const COLUMN_INFO: Record<string, string> = {
   orgName: "Organization name for the selected tenant.",
   tId: "Tenant identifier (tId) used to scope analytics for this organization.",
-  status: "Job status for this period: pending, processing, complete, or failed.",
+  status: "Job status for this period: generating, complete, or failed.",
   week: "ISO week number for this row’s date range.",
   month: "Calendar month number (1–12) for this row’s date range.",
   registeredUsers:
@@ -257,16 +312,55 @@ export default function OrganizationAnalyticsPage() {
 
   const weekOptions = useMemo(() => buildWeekOptions(Number(year) || currentYear), [year]);
 
+  /** Selecting week N checks 1..N. Unchecking week N clears N and every week after it. */
+  const handleWeeksChange = useCallback(
+    (next: string[]) => {
+      if (next.length === 0) {
+        setWeeks([]);
+        return;
+      }
+
+      const prevSet = new Set(weeks);
+      const nextSet = new Set(next);
+      const added = next.filter((week) => !prevSet.has(week));
+      const removed = weeks.filter((week) => !nextSet.has(week));
+
+      if (removed.length > 0 && added.length === 0) {
+        const cutAt = Math.min(...removed.map(Number));
+        if (cutAt <= 1) {
+          setWeeks([]);
+          return;
+        }
+        setWeeks(Array.from({ length: cutAt - 1 }, (_, i) => String(i + 1)));
+        return;
+      }
+
+      const maxWeek = Math.max(...next.map(Number));
+      setWeeks(Array.from({ length: maxWeek }, (_, i) => String(i + 1)));
+    },
+    [weeks],
+  );
+
   const [loading, setLoading] = useState(false);
   const [polling, setPolling] = useState(false);
   const [error, setError] = useState("");
+  const [tenantBatchProgress, setTenantBatchProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
   const [results, setResults] = useState<OrgAnalyticsResult[]>([]);
   const [tableOrgFilter, setTableOrgFilter] = useState("");
   const [tableTidFilter, setTableTidFilter] = useState("");
   const [tableWeekFilter, setTableWeekFilter] = useState("");
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollInFlightRef = useRef(false);
   const requestRef = useRef(0);
+  const resultsRef = useRef<OrgAnalyticsResult[]>([]);
+  const selectedSummaryOrgIdRef = useRef("");
+  const summaryTableBodyRef = useRef<HTMLTableSectionElement | null>(null);
+
+  resultsRef.current = results;
 
   const selectedOrgs = useMemo(
     () => organisationOptions.filter((org) => tenantIds.includes(org._id) && org.tId),
@@ -312,18 +406,30 @@ export default function OrganizationAnalyticsPage() {
     ];
   }, [scopeWeeks, scopeMonths]);
 
-  const workingTenants = useMemo(() => {
-    if (loading && results.length === 0) {
-      return selectedOrgs.map((org) => org.name);
-    }
-    return results
-      .filter((r) =>
-        r.response.records.some((rec) => rec.status === "processing" || rec.status === "pending"),
-      )
-      .map((r) => r.orgName);
-  }, [loading, results, selectedOrgs]);
+  const isGenerating = loading || polling;
 
-  const showProgress = workingTenants.length > 0 || loading || polling;
+  const showProgress = isGenerating;
+
+  const progressLabel = [
+    tenantBatchProgress
+      ? `Fetching tenant batch ${tenantBatchProgress.current}/${tenantBatchProgress.total}`
+      : null,
+    isGenerating ? "Generating…" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  useLayoutEffect(() => {
+    const selectedId = selectedSummaryOrgIdRef.current;
+    const body = summaryTableBodyRef.current;
+    if (!body) return;
+    for (const row of body.querySelectorAll("[data-org-id]")) {
+      row.setAttribute(
+        "data-selected",
+        row.getAttribute("data-org-id") === selectedId ? "true" : "false",
+      );
+    }
+  }, [results]);
 
   const allRecords = useMemo(
     () =>
@@ -449,11 +555,16 @@ export default function OrganizationAnalyticsPage() {
   };
 
   const fetchAnalytics = useCallback(
-    async (opts?: { silent?: boolean }) => {
+    async (opts?: { silent?: boolean; tIds?: string[] }) => {
       if (!platform || selectedOrgs.length === 0 || !year || !weeks.length) {
         setError("Select platform, one or more tenants, year, and at least one week");
         return null;
       }
+
+      const orgs = opts?.tIds?.length
+        ? selectedOrgs.filter((org) => opts.tIds!.includes(org.tId))
+        : selectedOrgs;
+      if (orgs.length === 0) return [];
 
       const requestId = ++requestRef.current;
       if (!opts?.silent) {
@@ -461,54 +572,59 @@ export default function OrganizationAnalyticsPage() {
         setError("");
       }
 
+      const selectedWeeks = weeks.map(Number).sort((a, b) => a - b);
+      const batches = chunk(orgs, TENANT_BATCH_SIZE);
+      const settled: OrgAnalyticsResult[] = [];
+
       try {
-        const selectedWeeks = weeks.map(Number).sort((a, b) => a - b);
-        const response = await post<OrganizationAnalyticsResponse>(
-          "/admin/organization-analytics",
-          {
-            platformKey: platform,
-            tIds: selectedOrgs.map((org) => org.tId),
-            year: Number(year),
-            weeks: selectedWeeks,
-            includeSummary: true,
-          },
-        );
+        for (let i = 0; i < batches.length; i++) {
+          if (requestId !== requestRef.current) return null;
 
-        if (requestId !== requestRef.current) return null;
+          if (!opts?.silent && batches.length > 1) {
+            setTenantBatchProgress({ current: i + 1, total: batches.length });
+          }
 
-        const byTid = new Map((response.results || []).map((result) => [result.tId, result]));
-        const settled = selectedOrgs.map((org) => {
-          const result = byTid.get(org.tId);
-          const records =
-            result?.records || response.records.filter((record) => record.tId === org.tId);
-          return {
-            orgId: org._id,
-            orgName: org.name,
-            tId: org.tId,
-            response: {
-              reportBatchId: result?.reportBatchId || response.reportBatchId,
-              triggered: result?.triggered ?? response.triggered,
-              selectedWeek: result?.selectedWeek ?? response.selectedWeek,
-              weeks: response.weeks || selectedWeeks,
-              months: response.months || [],
-              records,
-              summaryRow:
-                result?.summaryRow ?? (selectedOrgs.length === 1 ? response.summaryRow : null),
+          const response = await post<OrganizationAnalyticsResponse>(
+            "/admin/organization-analytics",
+            {
+              platformKey: platform,
+              tIds: batches[i].map((org) => org.tId),
+              year: Number(year),
+              weeks: selectedWeeks,
+              includeSummary: true,
+              trigger: !opts?.silent,
             },
-          } as OrgAnalyticsResult;
-        });
+          );
 
-        setResults(settled);
+          settled.push(...mapAnalyticsResponse(batches[i], response, selectedWeeks));
+          if (opts?.silent) {
+            const byTid = new Map(settled.map((row) => [row.tId, row]));
+            const next = resultsRef.current.map((row) => byTid.get(row.tId) ?? row);
+            resultsRef.current = next;
+            setResults(next);
+          } else {
+            resultsRef.current = [...settled];
+            setResults(resultsRef.current);
+          }
+        }
+
         if (!opts?.silent) setError("");
         return settled;
       } catch (e) {
         if (requestId !== requestRef.current) return null;
         const message = e instanceof Error ? e.message : "Failed to load organization analytics";
+        if (settled.length > 0) {
+          setError(`${message} (${settled.length} of ${selectedOrgs.length} tenants loaded.)`);
+          return settled;
+        }
         setError(message);
         return null;
       } finally {
-        if (requestId === requestRef.current && !opts?.silent) {
-          setLoading(false);
+        if (requestId === requestRef.current) {
+          setTenantBatchProgress(null);
+          if (!opts?.silent) {
+            setLoading(false);
+          }
         }
       }
     },
@@ -518,16 +634,27 @@ export default function OrganizationAnalyticsPage() {
   const startPolling = useCallback(() => {
     stopPolling();
     setPolling(true);
-    pollTimerRef.current = setInterval(async () => {
-      const data = await fetchAnalytics({ silent: true });
-      if (!data) return;
-      const stillProcessing = data.some((r) =>
-        r.response.records.some((rec) => rec.status === "processing" || rec.status === "pending"),
-      );
-      if (!stillProcessing) {
+    const timer = setInterval(async () => {
+      if (pollTimerRef.current !== timer || pollInFlightRef.current) return;
+      const tIds = busyTenantIds(resultsRef.current);
+      if (tIds.length === 0) {
         stopPolling();
+        return;
+      }
+      pollInFlightRef.current = true;
+      try {
+        await fetchAnalytics({ silent: true, tIds });
+        if (pollTimerRef.current !== timer) return;
+        if (busyTenantIds(resultsRef.current).length === 0) {
+          stopPolling();
+        }
+      } finally {
+        if (pollTimerRef.current === timer) {
+          pollInFlightRef.current = false;
+        }
       }
     }, POLL_INTERVAL_MS);
+    pollTimerRef.current = timer;
   }, [fetchAnalytics, stopPolling]);
 
   const needsLargeSelectionConfirm =
@@ -539,12 +666,14 @@ export default function OrganizationAnalyticsPage() {
     setTableTidFilter("");
     setTableWeekFilter("");
     const data = await fetchAnalytics();
-    if (!data) return;
-    const stillProcessing = data.some((r) =>
-      r.response.records.some((rec) => rec.status === "processing" || rec.status === "pending"),
-    );
-    if (stillProcessing) {
+    if (!data) {
+      stopPolling();
+      return;
+    }
+    if (stillGeneratingFromResults(data)) {
       startPolling();
+    } else {
+      stopPolling();
     }
   };
 
@@ -728,7 +857,7 @@ export default function OrganizationAnalyticsPage() {
                 label="Weeks"
                 options={weekOptions}
                 value={weeks}
-                onChange={setWeeks}
+                onChange={handleWeeksChange}
                 placeholder="Select one or more weeks"
                 searchPlaceholder="Search weeks..."
                 emptyMessage="No weeks found"
@@ -737,8 +866,10 @@ export default function OrganizationAnalyticsPage() {
               />
             </div>
             <p className="mt-4 text-xs text-gray-500">
-              Generates weeks, overlapping months, and a summary for the tenants and weeks you
-              selected. Already completed periods are reused from cache and are not recalculated.
+              Selecting a week checks every week from 1 through that week. Unchecking a week clears
+              that week and every week after it. Generates weeks, overlapping months, and a summary
+              for the tenants and weeks you selected. Already completed periods are reused from
+              cache and are not recalculated.
             </p>
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -747,23 +878,14 @@ export default function OrganizationAnalyticsPage() {
                 disabled={loading || !platform || tenantIds.length === 0 || weeks.length === 0}
                 loading={loading}
               >
-                {loading ? "Loading..." : "Load / Generate"}
+                {loading ? "Generating..." : "Load / Generate"}
               </Button>
             </div>
 
             {showProgress && (
               <div className="mt-4 flex items-center gap-3 rounded-lg border border-[#1f00a3]/15 bg-[#1f00a3]/5 px-4 py-3">
                 <Loader size="sm" variant="primary" inline />
-                <p className="text-sm text-[#1f00a3]">
-                  <span className="font-medium">Loading tenant</span>
-                  {workingTenants.length > 0 ? (
-                    <>
-                      : <span className="font-semibold">{workingTenants.join(", ")}</span>
-                    </>
-                  ) : (
-                    "…"
-                  )}
-                </p>
+                <p className="text-sm font-medium text-[#1f00a3]">{progressLabel}</p>
               </div>
             )}
 
@@ -784,10 +906,10 @@ export default function OrganizationAnalyticsPage() {
                   {results.some((r) => r.response.triggered) ? "yes" : "no (cached)"}
                 </span>
               </span>
-              {workingTenants.length > 0 && (
+              {isGenerating && (
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-[#1f00a3]/10 px-2.5 py-1 text-sm text-[#1f00a3]">
                   <Loader size="sm" variant="primary" inline />
-                  Loading: {workingTenants.join(", ")}
+                  Generating
                 </span>
               )}
             </div>
@@ -797,9 +919,9 @@ export default function OrganizationAnalyticsPage() {
                 <CardTitle>Current Summary</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="overflow-x-auto">
+                <div className="max-h-96 overflow-auto">
                   <table className="min-w-full divide-y divide-gray-200 text-sm">
-                    <thead>
+                    <thead className="sticky top-0 z-10">
                       <tr>
                         {spreadsheetColumns.map((col) => (
                           <th
@@ -814,7 +936,7 @@ export default function OrganizationAnalyticsPage() {
                         ))}
                       </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-100">
+                    <tbody ref={summaryTableBodyRef} className="bg-white divide-y divide-gray-100">
                       {summaryTotalsRow && (
                         <tr className="border-y-2 border-[#1f00a3]/40 bg-[#1f00a3]/12">
                           {spreadsheetColumns.map((col) => {
@@ -835,7 +957,22 @@ export default function OrganizationAnalyticsPage() {
                         </tr>
                       )}
                       {results.map((result) => (
-                        <tr key={result.orgId}>
+                        <tr
+                          key={result.orgId}
+                          data-org-id={result.orgId}
+                          className="cursor-pointer hover:bg-gray-50 data-[selected=true]:bg-[#1f00a3]/10"
+                          onClick={(event) => {
+                            const row = event.currentTarget;
+                            const next =
+                              selectedSummaryOrgIdRef.current === result.orgId ? "" : result.orgId;
+                            const body = summaryTableBodyRef.current;
+                            body
+                              ?.querySelector('[data-selected="true"]')
+                              ?.setAttribute("data-selected", "false");
+                            selectedSummaryOrgIdRef.current = next;
+                            if (next) row.setAttribute("data-selected", "true");
+                          }}
+                        >
                           {spreadsheetColumns.map((col) => {
                             const value = rowValue(result, col.key);
                             return (
@@ -843,26 +980,20 @@ export default function OrganizationAnalyticsPage() {
                                 key={col.key}
                                 className="whitespace-nowrap px-3 py-2 text-left text-gray-900"
                               >
-                                {col.key === "status" && typeof value === "string" ? (
-                                  <span
-                                    className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${statusClass(value as AnalyticsStatus)}`}
-                                  >
-                                    {(value === "processing" || value === "pending") && (
-                                      <Loader size="sm" variant="primary" inline />
-                                    )}
-                                    {value}
-                                  </span>
-                                ) : typeof value === "number" ? (
-                                  PERCENT_COLUMN_KEYS.has(col.key) ? (
-                                    formatPercent(value)
-                                  ) : (
-                                    formatNumber(value)
-                                  )
-                                ) : value == null ? (
-                                  "—"
-                                ) : (
-                                  String(value)
-                                )}
+                                {col.key === "status" && typeof value === "string"
+                                  ? renderStatusBadge(
+                                      value,
+                                      isGenerating &&
+                                        result.response.triggered &&
+                                        value !== "failed",
+                                    )
+                                  : typeof value === "number"
+                                    ? PERCENT_COLUMN_KEYS.has(col.key)
+                                      ? formatPercent(value)
+                                      : formatNumber(value)
+                                    : value == null
+                                      ? "—"
+                                      : String(value)}
                               </td>
                             );
                           })}
@@ -972,15 +1103,12 @@ export default function OrganizationAnalyticsPage() {
                               </td>
                               <td className="px-3 py-2 text-left">{record.week}</td>
                               <td className="px-3 py-2 text-left">
-                                <span
-                                  className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${statusClass(record.status)}`}
-                                >
-                                  {(record.status === "processing" ||
-                                    record.status === "pending") && (
-                                    <Loader size="sm" variant="primary" inline />
-                                  )}
-                                  {record.status}
-                                </span>
+                                {renderStatusBadge(
+                                  record.status,
+                                  isGenerating &&
+                                    record.status !== "complete" &&
+                                    record.status !== "failed",
+                                )}
                               </td>
                               <td className="px-3 py-2 text-left">
                                 {formatNumber(record.registeredUsers)}
@@ -1004,8 +1132,7 @@ export default function OrganizationAnalyticsPage() {
                                         <span>
                                           {record.processedUsers || 0}/{record.totalUsers}
                                         </span>
-                                        {(record.status === "processing" ||
-                                          record.status === "pending") && (
+                                        {(isBusyStatus(record.status) || isGenerating) && (
                                           <Loader size="sm" variant="primary" inline />
                                         )}
                                       </div>
@@ -1087,15 +1214,12 @@ export default function OrganizationAnalyticsPage() {
                               </td>
                               <td className="px-3 py-2 text-left">{record.month}</td>
                               <td className="px-3 py-2 text-left">
-                                <span
-                                  className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${statusClass(record.status)}`}
-                                >
-                                  {(record.status === "processing" ||
-                                    record.status === "pending") && (
-                                    <Loader size="sm" variant="primary" inline />
-                                  )}
-                                  {record.status}
-                                </span>
+                                {renderStatusBadge(
+                                  record.status,
+                                  isGenerating &&
+                                    record.status !== "complete" &&
+                                    record.status !== "failed",
+                                )}
                               </td>
                               <td className="px-3 py-2 text-left">
                                 {formatNumber(record.registeredUsers)}
