@@ -189,6 +189,9 @@ const requiresPlatformForNotSent = (filterState: FilterState, logSearchState: Lo
 
 const requiresPlatformSelection = (filterState: FilterState) => !filterState.platform;
 
+const isTeamsPlatform = (platform: { key: string; name: string }) =>
+  platform.key?.toLowerCase() === "teams" || platform.name?.toLowerCase() === "teams";
+
 export default function NotificationLogsPage() {
   const router = useRouter();
   const isAuthenticated = useAppSelector((s) => s.auth.isAuthenticated);
@@ -292,7 +295,7 @@ export default function NotificationLogsPage() {
     try {
       const response = await get<{ key: string; name: string }[]>("/admin/platform-data");
       if (response) {
-        setPlatformOptions(response);
+        setPlatformOptions(response.filter((platform) => !isTeamsPlatform(platform)));
       }
     } catch (e) {
       console.error("Error fetching platforms:", e);
