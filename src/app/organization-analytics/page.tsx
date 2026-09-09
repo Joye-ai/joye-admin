@@ -121,13 +121,19 @@ const getCurrentIsoWeek = () => {
 
 const currentIsoWeek = getCurrentIsoWeek();
 
+/**
+ * Only offer weeks that have finished. Generating the running week stores a
+ * part-week count that is then cached as `complete` and never recalculated.
+ */
+const lastCompletedIsoWeek = Math.max(0, currentIsoWeek - 1);
+
 const YEAR_OPTIONS = Array.from({ length: 6 }, (_, i) => {
   const year = currentYear - i;
   return { value: String(year), label: String(year) };
 });
 
 const buildWeekOptions = (selectedYear: number) => {
-  const maxWeek = selectedYear === currentYear ? currentIsoWeek : 52;
+  const maxWeek = selectedYear === currentYear ? lastCompletedIsoWeek : 52;
   return Array.from({ length: maxWeek }, (_, i) => {
     const week = i + 1;
     return { value: String(week), label: `Week ${week}` };
@@ -917,7 +923,7 @@ export default function OrganizationAnalyticsPage() {
                 value={year}
                 onChange={(value) => {
                   setYear(value);
-                  const maxWeek = Number(value) === currentYear ? currentIsoWeek : 52;
+                  const maxWeek = Number(value) === currentYear ? lastCompletedIsoWeek : 52;
                   setWeeks((prev) => prev.filter((selected) => Number(selected) <= maxWeek));
                 }}
                 placeholder="Select Year"
