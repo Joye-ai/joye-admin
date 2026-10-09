@@ -32,9 +32,15 @@ interface WellbeingMonthRow {
   month: number;
   year: number;
   wellbeingIndex: number | null;
-  joyLevel: number | null;
   brew: number | null;
+  brewCount: number | null;
   gratitude: number | null;
+  gratitudeCount: number | null;
+  mm: number | null;
+  mmCount: number | null;
+  totalCount: number | null;
+  helpful: number | null;
+  notHelpful: number | null;
   effectiveness: number | null;
 }
 
@@ -45,9 +51,15 @@ interface WellbeingAnalyticsRecord {
   year: number;
   month: number;
   wellbeingIndex: number | null;
-  joyLevel: number | null;
   brew: number | null;
+  brewCount: number | null;
   gratitude: number | null;
+  gratitudeCount: number | null;
+  mm: number | null;
+  mmCount: number | null;
+  totalCount: number | null;
+  helpful: number | null;
+  notHelpful: number | null;
   effectiveness: number | null;
 }
 
@@ -101,11 +113,82 @@ const formatPercent = (value: number | null | undefined) => {
   return `${Number(value).toFixed(1)}%`;
 };
 
+const formatCount = (value: number | null | undefined) => {
+  if (value == null || Number.isNaN(value)) return "—";
+  return String(Math.round(Number(value)));
+};
+
 const chunk = <T,>(items: T[], size: number): T[][] => {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
 };
+
+const COLUMN_INFO: Record<string, string> = {
+  wellbeingIndex:
+    "Average of available scores among Brew, Gratitude, and Mindful Minute value. Brew/Gratitude = mean of non-null values. Mindful Minute value = (yes×8 + no×3 + maybe×5.5) ÷ (yes+no+maybe). Only present scores are averaged.",
+  mm: "Mindful Minute value = mean of (yes×8 + no×3 + maybe×5.5) ÷ (yes+no+maybe) for rows with yes/no/maybe answers that month.",
+  effectiveness:
+    "Effectiveness % = (count of Helpful) ÷ (Helpful + Not Helpful) × 100. From Feature_Feedback thumbs (likes / dislikes). Shown as — when there are no helpful/not-helpful responses that month.",
+};
+
+function ColumnInfoIcon({ info }: { info: string }) {
+  const [tip, setTip] = useState<{ top: number; left: number } | null>(null);
+
+  return (
+    <span className="relative ml-1 inline-flex align-middle">
+      <button
+        type="button"
+        className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-current/40 text-[9px] font-bold leading-none opacity-60 hover:opacity-100 focus:opacity-100 focus:outline-none"
+        aria-label={info}
+        onMouseEnter={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const width = 288;
+          const padding = 8;
+          const centerX = rect.left + rect.width / 2;
+          const left = Math.min(
+            Math.max(centerX, padding + width / 2),
+            window.innerWidth - padding - width / 2,
+          );
+          setTip({ top: rect.bottom + 6, left });
+        }}
+        onMouseLeave={() => setTip(null)}
+        onFocus={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const width = 288;
+          const padding = 8;
+          const centerX = rect.left + rect.width / 2;
+          const left = Math.min(
+            Math.max(centerX, padding + width / 2),
+            window.innerWidth - padding - width / 2,
+          );
+          setTip({ top: rect.bottom + 6, left });
+        }}
+        onBlur={() => setTip(null)}
+      >
+        i
+      </button>
+      {tip && (
+        <span
+          role="tooltip"
+          className="pointer-events-none fixed z-[100] w-72 -translate-x-1/2 whitespace-normal break-words rounded-md bg-gray-900 px-2.5 py-1.5 text-left text-[11px] font-normal normal-case leading-snug text-white shadow-lg"
+          style={{ top: tip.top, left: tip.left }}
+        >
+          {info}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function HeaderWithInfo({ label, infoKey }: { label: string; infoKey: string }) {
+  return (
+    <span className="inline-flex items-center">
+      {label}
+      <ColumnInfoIcon info={COLUMN_INFO[infoKey] || `How ${label} is calculated.`} />
+    </span>
+  );
+}
 
 export default function WellbeingAnalyticsPage() {
   const router = useRouter();
@@ -226,10 +309,23 @@ export default function WellbeingAnalyticsPage() {
         month: record.month,
         year: record.year,
         wellbeingIndex: record.wellbeingIndex,
-        joyLevel: record.joyLevel,
         brew: record.brew,
+        brewCount: record.brewCount,
         gratitude: record.gratitude,
-        effectiveness: record.effectiveness,
+        gratitudeCount: record.gratitudeCount,
+        mm: record.mm,
+        mmCount: record.mmCount,
+        totalCount: record.totalCount,
+        helpful: record.helpful,
+        notHelpful: record.notHelpful,
+        effectiveness:
+          record.effectiveness != null
+            ? record.effectiveness
+            : record.helpful != null &&
+                record.notHelpful != null &&
+                record.helpful + record.notHelpful > 0
+              ? Number(((record.helpful / (record.helpful + record.notHelpful)) * 100).toFixed(1))
+              : null,
       })),
     [orgNameByTid],
   );
@@ -408,26 +504,44 @@ export default function WellbeingAnalyticsPage() {
                         Month
                       </th>
                       <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
-                        Wellbeing Index
-                      </th>
-                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
-                        Joy Level
+                        <HeaderWithInfo label="Wellbeing Index" infoKey="wellbeingIndex" />
                       </th>
                       <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
                         Brew
                       </th>
                       <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        Brew Count
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
                         Gratitude
                       </th>
                       <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
-                        Effectiveness %
+                        Gratitude Count
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        <HeaderWithInfo label="Mindful Minute value" infoKey="mm" />
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        MM Count
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        Total Count
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        Helpful
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        Not Helpful
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        <HeaderWithInfo label="Effectiveness %" infoKey="effectiveness" />
                       </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
                     {rows.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-3 py-8 text-center text-gray-500">
+                        <td colSpan={14} className="px-3 py-8 text-center text-gray-500">
                           No rows for this selection
                         </td>
                       </tr>
@@ -445,13 +559,31 @@ export default function WellbeingAnalyticsPage() {
                             {formatMetric(row.wellbeingIndex)}
                           </td>
                           <td className="whitespace-nowrap px-3 py-2 text-gray-900">
-                            {formatMetric(row.joyLevel)}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 text-gray-900">
                             {formatMetric(row.brew)}
                           </td>
                           <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                            {formatCount(row.brewCount)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-gray-900">
                             {formatMetric(row.gratitude)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                            {formatCount(row.gratitudeCount)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                            {formatMetric(row.mm)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                            {formatCount(row.mmCount)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                            {formatCount(row.totalCount)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                            {formatCount(row.helpful)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                            {formatCount(row.notHelpful)}
                           </td>
                           <td className="whitespace-nowrap px-3 py-2 text-gray-900">
                             {formatPercent(row.effectiveness)}
