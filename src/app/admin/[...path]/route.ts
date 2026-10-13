@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/** Allow long-running admin proxies (e.g. LTI Mindtree Teams card analytics). */
+export const maxDuration = 300;
 
 const adminApiUrl = (process.env.ADMIN_API_URL || "http://localhost:8081").replace(/\/$/, "");
 
@@ -24,6 +26,8 @@ async function proxy(req: NextRequest, context: { params: Promise<{ path: string
     method: req.method,
     headers,
     redirect: "manual",
+    // Keep upstream open longer than Next's default ~30s proxy window.
+    signal: AbortSignal.timeout(300_000),
   };
 
   if (req.method !== "GET" && req.method !== "HEAD") {
