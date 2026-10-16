@@ -30,6 +30,20 @@ const MESSAGE_TYPE_OPTIONS = [
   { value: "thanks-cron", label: "Thanks Cron" },
   { value: "daily-suggestion", label: "Daily Suggestion" },
   { value: "daily-suggestion-monday", label: "Daily Suggestion Monday" },
+  { value: "daily-suggestion-tuesday", label: "Daily Suggestion Tuesday" },
+  { value: "daily-suggestion-wednesday", label: "Daily Suggestion Wednesday" },
+  { value: "daily-suggestion-thursday", label: "Daily Suggestion Thursday" },
+  { value: "daily-suggestion-friday", label: "Daily Suggestion Friday" },
+  { value: "daily-suggestion-reminder-cron", label: "Daily Suggestion Reminder" },
+  { value: "di-mon", label: "DI Mon" },
+  { value: "di-tue", label: "DI Tue" },
+  { value: "di-wed", label: "DI Wed" },
+  { value: "di-thu", label: "DI Thu" },
+  { value: "di-fri", label: "DI Fri" },
+  { value: "fr-wed", label: "FR Wed" },
+  { value: "fr-fri", label: "FR Fri" },
+  { value: "welcomeMessage", label: "Welcome Message" },
+  { value: "welcome-start-card", label: "Welcome Start Card" },
   { value: "calendar", label: "Calendar" },
   { value: "dynamic-calendar", label: "Dynamic Calendar" },
 ];
@@ -84,6 +98,7 @@ interface LogSearchState {
 
 interface TeamsCardLogAnalytics {
   consolidated: {
+    totalUsers: number;
     totalCards: number;
     uniqueUsers: number;
   };
@@ -94,6 +109,7 @@ interface TeamsCardLogAnalytics {
     organizationId: string;
     tenantName: string;
     tId: string;
+    totalUsers: number;
     totalCards: number;
     uniqueUsers: number;
   }[];
@@ -599,7 +615,11 @@ export default function TeamsCardLogsPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <KPITile
+            title="Total Users (created by end date)"
+            value={analytics ? String(analytics.consolidated.totalUsers ?? 0) : "—"}
+          />
           <KPITile
             title="Total Cards"
             value={analytics ? String(analytics.consolidated.totalCards) : "—"}
@@ -623,6 +643,7 @@ export default function TeamsCardLogsPage() {
                       <tr className="text-left text-gray-600">
                         <th className="bg-white px-4 py-3 font-medium">Tenant</th>
                         <th className="bg-white px-4 py-3 font-medium">TID</th>
+                        <th className="bg-white px-4 py-3 text-right font-medium">Total Users</th>
                         <th className="bg-white px-4 py-3 text-right font-medium">Total Cards</th>
                         <th className="bg-white px-4 py-3 text-right font-medium">Unique Users</th>
                       </tr>
@@ -632,6 +653,9 @@ export default function TeamsCardLogsPage() {
                         <tr key={row.organizationId} className="border-b border-gray-100">
                           <td className="px-4 py-2 text-gray-900">{row.tenantName}</td>
                           <td className="px-4 py-2 text-gray-900">{row.tId}</td>
+                          <td className="px-4 py-2 text-right text-gray-900">
+                            {(row.totalUsers ?? 0).toLocaleString()}
+                          </td>
                           <td className="px-4 py-2 text-right text-gray-900">
                             {row.totalCards.toLocaleString()}
                           </td>
@@ -645,6 +669,9 @@ export default function TeamsCardLogsPage() {
                       <tr className="font-semibold text-gray-900">
                         <td className="bg-gray-50 px-4 py-3">Total</td>
                         <td className="bg-gray-50 px-4 py-3">—</td>
+                        <td className="bg-gray-50 px-4 py-3 text-right">
+                          {(analytics.consolidated.totalUsers ?? 0).toLocaleString()}
+                        </td>
                         <td className="bg-gray-50 px-4 py-3 text-right">
                           {analytics.consolidated.totalCards.toLocaleString()}
                         </td>
