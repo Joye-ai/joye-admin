@@ -13,7 +13,7 @@ export const ROUTES = {
   TEAMS_CARD_LOGS: "/teams-card-logs",
   ORGANIZATION_ANALYTICS: "/organization-analytics",
   ORG_ANALYTICS: "/org-analytics",
-  WELLBEING_ANALYTICS: "/wellbeing-analytics",
+  CLIENT_REPORT: "/client-report",
 } as const;
 
 // Route Groups
@@ -28,6 +28,6 @@ export const ROUTE_GROUPS = {
     ROUTES.TEAMS_CARD_LOGS,
     ROUTES.ORGANIZATION_ANALYTICS,
     ROUTES.ORG_ANALYTICS,
-    ROUTES.WELLBEING_ANALYTICS,
+    ROUTES.CLIENT_REPORT,
   ],
 } as const;
