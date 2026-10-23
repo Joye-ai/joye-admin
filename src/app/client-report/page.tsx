@@ -35,6 +35,8 @@ interface WellbeingMonthRow {
   wellbeingIndex: number | null;
   brew: number | null;
   brewCount: number | null;
+  starRating: number | null;
+  starRatingCount: number | null;
   gratitude: number | null;
   gratitudeCount: number | null;
   mm: number | null;
@@ -56,6 +58,8 @@ interface WellbeingAnalyticsRecord {
   wellbeingIndex: number | null;
   brew: number | null;
   brewCount: number | null;
+  starRating: number | null;
+  starRatingCount: number | null;
   gratitude: number | null;
   gratitudeCount: number | null;
   mm: number | null;
@@ -113,6 +117,40 @@ interface EmotionalDriverAnalyticsResponse {
   tIds: string[];
   records: EmotionalDriverAnalyticsRecord[];
   categoryRecords?: EmotionalCategoryAnalyticsRecord[];
+}
+
+interface FeatureUsageAnalyticsRecord {
+  platformKey: string;
+  tId: string;
+  year: number;
+  month: number;
+  page: string;
+  label: string;
+  usersWithFeature: number;
+  totalViews: number | null;
+  userCount: number;
+}
+
+interface FeatureUsageAnalyticsResponse {
+  year: number;
+  months: number[];
+  platformKey: string;
+  tIds: string[];
+  records: FeatureUsageAnalyticsRecord[];
+}
+
+interface FeatureUsageRow {
+  id: string;
+  platformKey: string;
+  orgName: string;
+  tId: string;
+  month: number;
+  year: number;
+  page: string;
+  label: string;
+  usersWithFeature: number;
+  totalViews: number | null;
+  userCount: number;
 }
 
 interface DriverMonthRow {
@@ -375,6 +413,9 @@ const COLUMN_INFO: Record<string, string> = {
   mm: "Mindful Minute value = mean of (yes×8 + no×3 + maybe×5.5) ÷ (yes+no+maybe) for rows with yes/no/maybe answers that month.",
   effectiveness:
     "Effectiveness % = (count of Helpful) ÷ (Helpful + Not Helpful) × 100. From Feature_Feedback thumbs (likes / dislikes). Shown as — when there are no helpful/not-helpful responses that month.",
+  starRating:
+    "Average Brew star rating for the month (rating, else currentAverage, else average). Only Brew docs with a rating > 0 are included.",
+  starRatingCount: "Count of Brew documents with a star rating in the month.",
   orgName: "Organization name for the selected tenant.",
   tId: "Tenant identifier (tId) used to scope analytics for this organization.",
   status: "Org Analytics summary status (complete / generating / failed).",
@@ -462,6 +503,7 @@ export default function WellbeingAnalyticsPage() {
   const [rows, setRows] = useState<WellbeingMonthRow[]>([]);
   const [driverRows, setDriverRows] = useState<DriverMonthRow[]>([]);
   const [categoryRows, setCategoryRows] = useState<CategoryMonthRow[]>([]);
+  const [featureUsageRows, setFeatureUsageRows] = useState<FeatureUsageRow[]>([]);
   const [orgSummaryRows, setOrgSummaryRows] = useState<OrgSummaryResult[]>([]);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [tenantBatchProgress, setTenantBatchProgress] = useState<{
@@ -556,6 +598,7 @@ export default function WellbeingAnalyticsPage() {
     setRows([]);
     setDriverRows([]);
     setCategoryRows([]);
+    setFeatureUsageRows([]);
     setOrgSummaryRows([]);
     setHasLoaded(false);
     if (platform) fetchOrganisations(platform);
@@ -573,6 +616,8 @@ export default function WellbeingAnalyticsPage() {
         wellbeingIndex: record.wellbeingIndex,
         brew: record.brew,
         brewCount: record.brewCount,
+        starRating: record.starRating ?? null,
+        starRatingCount: record.starRatingCount ?? null,
         gratitude: record.gratitude,
         gratitudeCount: record.gratitudeCount,
         mm: record.mm,
@@ -658,17 +703,46 @@ export default function WellbeingAnalyticsPage() {
     [orgNameByTid],
   );
 
+  const mapFeatureUsageRecords = useCallback(
+    (records: FeatureUsageAnalyticsRecord[]): FeatureUsageRow[] =>
+      records
+        .map((record) => ({
+          id: `${record.platformKey}-${record.tId}-${record.year}-${record.month}-${record.page}`,
+          platformKey: record.platformKey,
+          orgName: orgNameByTid.get(record.tId) || record.tId,
+          tId: record.tId,
+          month: record.month,
+          year: record.year,
+          page: record.page,
+          label: record.label,
+          usersWithFeature: record.usersWithFeature,
+          totalViews: record.totalViews,
+          userCount: record.userCount,
+        }))
+        .sort(
+          (a, b) =>
+            a.orgName.localeCompare(b.orgName) ||
+            a.month - b.month ||
+            b.usersWithFeature - a.usersWithFeature ||
+            a.label.localeCompare(b.label),
+        ),
+    [orgNameByTid],
+  );
+
   const wellbeingTableTotals = useMemo(() => {
     if (!rows.length) return null;
     let wellbeingWeighted = 0;
     let wellbeingWeight = 0;
     let brewWeighted = 0;
     let brewWeight = 0;
+    let starRatingWeighted = 0;
+    let starRatingWeight = 0;
     let gratitudeWeighted = 0;
     let gratitudeWeight = 0;
     let mmWeighted = 0;
     let mmWeight = 0;
     let brewCount = 0;
+    let starRatingCount = 0;
     let gratitudeCount = 0;
     let mmCount = 0;
     let totalCount = 0;
@@ -683,6 +757,10 @@ export default function WellbeingAnalyticsPage() {
         brewWeighted += row.brew;
         brewWeight += 1;
       }
+      if (row.starRating != null && (row.starRatingCount || 0) > 0) {
+        starRatingWeighted += row.starRating * (row.starRatingCount || 0);
+        starRatingWeight += row.starRatingCount || 0;
+      }
       if (row.gratitude != null) {
         gratitudeWeighted += row.gratitude;
         gratitudeWeight += 1;
@@ -692,6 +770,7 @@ export default function WellbeingAnalyticsPage() {
         mmWeight += 1;
       }
       brewCount += row.brewCount || 0;
+      starRatingCount += row.starRatingCount || 0;
       gratitudeCount += row.gratitudeCount || 0;
       mmCount += row.mmCount || 0;
       totalCount += row.totalCount || 0;
@@ -704,6 +783,9 @@ export default function WellbeingAnalyticsPage() {
         wellbeingWeight > 0 ? Number((wellbeingWeighted / wellbeingWeight).toFixed(1)) : null,
       brew: brewWeight > 0 ? Number((brewWeighted / brewWeight).toFixed(1)) : null,
       brewCount: brewCount || null,
+      starRating:
+        starRatingWeight > 0 ? Number((starRatingWeighted / starRatingWeight).toFixed(1)) : null,
+      starRatingCount: starRatingCount || null,
       gratitude:
         gratitudeWeight > 0 ? Number((gratitudeWeighted / gratitudeWeight).toFixed(1)) : null,
       gratitudeCount: gratitudeCount || null,
@@ -784,6 +866,29 @@ export default function WellbeingAnalyticsPage() {
     return { categories, orgUsers };
   }, [categoryRows]);
 
+  const featureUsageTableTotals = useMemo(() => {
+    if (!featureUsageRows.length) return null;
+    let usersWithFeature = 0;
+    let totalViews = 0;
+    let hasViews = false;
+    const orgUsersByTid = new Map<string, number>();
+    for (const row of featureUsageRows) {
+      usersWithFeature += row.usersWithFeature || 0;
+      if (row.totalViews != null) {
+        totalViews += row.totalViews;
+        hasViews = true;
+      }
+      orgUsersByTid.set(row.tId, Math.max(orgUsersByTid.get(row.tId) || 0, row.userCount || 0));
+    }
+    let orgUsers = 0;
+    for (const count of orgUsersByTid.values()) orgUsers += count;
+    return {
+      usersWithFeature,
+      totalViews: hasViews ? totalViews : null,
+      orgUsers,
+    };
+  }, [featureUsageRows]);
+
   const summaryTotalsRow = useMemo(() => {
     if (!orgSummaryRows.length) return null;
 
@@ -849,6 +954,7 @@ export default function WellbeingAnalyticsPage() {
     setRows([]);
     setDriverRows([]);
     setCategoryRows([]);
+    setFeatureUsageRows([]);
     setOrgSummaryRows([]);
     setHasLoaded(true);
 
@@ -856,6 +962,7 @@ export default function WellbeingAnalyticsPage() {
     const allRecords: WellbeingAnalyticsRecord[] = [];
     const allDriverRecords: EmotionalDriverAnalyticsRecord[] = [];
     const allCategoryRecords: EmotionalCategoryAnalyticsRecord[] = [];
+    const allFeatureUsageRecords: FeatureUsageAnalyticsRecord[] = [];
     const allOrgSummary: OrgSummaryResult[] = [];
     const selectedMonths = months.map(Number).sort((a, b) => a - b);
     const selectedWeeks = isoWeeksForMonths(Number(year) || currentYear, selectedMonths);
@@ -882,6 +989,7 @@ export default function WellbeingAnalyticsPage() {
         const requests: [
           Promise<WellbeingAnalyticsResponse>,
           Promise<EmotionalDriverAnalyticsResponse>,
+          Promise<FeatureUsageAnalyticsResponse>,
           Promise<OrganizationAnalyticsResponse | null>,
         ] = [
           post<WellbeingAnalyticsResponse>("/admin/wellbeing-analytics", {
@@ -889,6 +997,7 @@ export default function WellbeingAnalyticsPage() {
             viewMode: "organization",
           }),
           post<EmotionalDriverAnalyticsResponse>("/admin/emotional-drivers-analytics", payloadBase),
+          post<FeatureUsageAnalyticsResponse>("/admin/feature-usage-analytics", payloadBase),
           selectedWeeks.length
             ? post<OrganizationAnalyticsResponse>("/admin/organization-analytics", {
                 platformKey: platform,
@@ -904,12 +1013,13 @@ export default function WellbeingAnalyticsPage() {
             : Promise.resolve(null),
         ];
 
-        const [wellbeingResponse, driversResponse, orgAnalyticsResponse] =
+        const [wellbeingResponse, driversResponse, featureUsageResponse, orgAnalyticsResponse] =
           await Promise.all(requests);
 
         allRecords.push(...(wellbeingResponse?.records || []));
         allDriverRecords.push(...(driversResponse?.records || []));
         allCategoryRecords.push(...(driversResponse?.categoryRecords || []));
+        allFeatureUsageRecords.push(...(featureUsageResponse?.records || []));
 
         if (orgAnalyticsResponse) {
           const byTid = new Map(
@@ -938,6 +1048,7 @@ export default function WellbeingAnalyticsPage() {
         setRows(mapRecords(allRecords));
         setDriverRows(mapDriverRecords(allDriverRecords));
         setCategoryRows(mapCategoryRecords(allCategoryRecords));
+        setFeatureUsageRows(mapFeatureUsageRecords(allFeatureUsageRecords));
         setOrgSummaryRows([...allOrgSummary].sort((a, b) => a.orgName.localeCompare(b.orgName)));
       }
 
@@ -946,16 +1057,21 @@ export default function WellbeingAnalyticsPage() {
     } catch (e) {
       if (requestId !== requestRef.current) return;
       console.error(e);
-      const base = e instanceof Error ? e.message : "Failed to load wellbeing analytics";
+      const base = e instanceof Error ? e.message : "Failed to load client report";
       setError(
-        allRecords.length > 0 || allDriverRecords.length > 0
+        allRecords.length > 0 || allDriverRecords.length > 0 || allFeatureUsageRecords.length > 0
           ? `${base} (${completedTenants} of ${selectedOrgs.length} tenants loaded.)`
           : base,
       );
-      if (allRecords.length === 0 && allDriverRecords.length === 0) {
+      if (
+        allRecords.length === 0 &&
+        allDriverRecords.length === 0 &&
+        allFeatureUsageRecords.length === 0
+      ) {
         setRows([]);
         setDriverRows([]);
         setCategoryRows([]);
+        setFeatureUsageRows([]);
         setOrgSummaryRows([]);
         setHasLoaded(false);
       }
@@ -965,7 +1081,16 @@ export default function WellbeingAnalyticsPage() {
         setLoading(false);
       }
     }
-  }, [platform, selectedOrgs, year, months, mapRecords, mapDriverRecords, mapCategoryRecords]);
+  }, [
+    platform,
+    selectedOrgs,
+    year,
+    months,
+    mapRecords,
+    mapDriverRecords,
+    mapCategoryRecords,
+    mapFeatureUsageRecords,
+  ]);
 
   return (
     <Layout
@@ -1169,6 +1294,12 @@ export default function WellbeingAnalyticsPage() {
                         Brew Count
                       </th>
                       <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        <HeaderWithInfo label="Star Rating Avg" infoKey="starRating" />
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        <HeaderWithInfo label="Star Rating Count" infoKey="starRatingCount" />
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
                         Gratitude
                       </th>
                       <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
@@ -1197,7 +1328,7 @@ export default function WellbeingAnalyticsPage() {
                   <tbody className="bg-white divide-y divide-gray-100">
                     {rows.length === 0 ? (
                       <tr>
-                        <td colSpan={14} className="px-3 py-8 text-center text-gray-500">
+                        <td colSpan={16} className="px-3 py-8 text-center text-gray-500">
                           No rows for this selection
                         </td>
                       </tr>
@@ -1223,6 +1354,12 @@ export default function WellbeingAnalyticsPage() {
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 text-gray-900">
                               {formatCount(row.brewCount)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                              {formatMetric(row.starRating)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                              {formatCount(row.starRatingCount)}
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 text-gray-900">
                               {formatMetric(row.gratitude)}
@@ -1269,6 +1406,12 @@ export default function WellbeingAnalyticsPage() {
                             </td>
                             <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
                               {formatCount(wellbeingTableTotals.brewCount)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
+                              {formatMetric(wellbeingTableTotals.starRating)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
+                              {formatCount(wellbeingTableTotals.starRatingCount)}
                             </td>
                             <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
                               {formatMetric(wellbeingTableTotals.gratitude)}
@@ -1599,6 +1742,130 @@ export default function WellbeingAnalyticsPage() {
                             })}
                             <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
                               {formatCount(categoryTableTotals.orgUsers)}
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {hasLoaded && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Feature usage (page views)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-4 text-xs text-gray-500">
+                Distinct users and total page views per feature from Page_View. Daily Brew users
+                come from Brew (no view total).
+              </p>
+              <div className="overflow-x-auto max-h-[32rem]">
+                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                  <thead className="sticky top-0 z-10 bg-gray-50">
+                    <tr>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        Platform
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        Organization
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        tId
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        Month
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        Feature
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        Page key
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        Users
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        Total views
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        Org users
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-100">
+                    {featureUsageRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="px-3 py-8 text-center text-gray-500">
+                          No feature usage rows for this selection
+                        </td>
+                      </tr>
+                    ) : (
+                      <>
+                        {featureUsageRows.map((row, index) => (
+                          <tr
+                            key={row.id}
+                            className={index % 2 === 0 ? "bg-white" : "bg-gray-50/80"}
+                          >
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                              {row.platformKey}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                              {row.orgName}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">{row.tId}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                              {formatMonth(row.month, row.year)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                              {row.label}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">
+                              {row.page}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                              {formatCount(row.usersWithFeature)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                              {formatCount(row.totalViews)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                              {formatCount(row.userCount)}
+                            </td>
+                          </tr>
+                        ))}
+                        {featureUsageTableTotals && (
+                          <tr className="sticky bottom-0 z-[5] border-y-2 border-[#1f00a3]/40 bg-[#1f00a3]/12">
+                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
+                              —
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
+                              Total
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
+                              —
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
+                              —
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
+                              —
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
+                              —
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
+                              {formatCount(featureUsageTableTotals.usersWithFeature)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
+                              {formatCount(featureUsageTableTotals.totalViews)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
+                              {formatCount(featureUsageTableTotals.orgUsers)}
                             </td>
                           </tr>
                         )}
