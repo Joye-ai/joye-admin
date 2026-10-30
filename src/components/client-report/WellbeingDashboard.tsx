@@ -523,12 +523,15 @@ export function WellbeingDashboard({
   const mau = useMemo(() => {
     let registered = 0;
     let active = 0;
+    let repeat = 0;
     for (const row of orgSummaryRows) {
       registered += row.summaryRow?.registeredUsers ?? 0;
       active += row.summaryRow?.activeUsers ?? 0;
+      repeat += row.summaryRow?.repeatUsers ?? 0;
     }
     const pct = registered > 0 ? Math.round((active / registered) * 100) : null;
-    return { registered, active, pct };
+    const repeatPct = active > 0 ? Math.round((repeat / active) * 100) : null;
+    return { registered, active, repeat, pct, repeatPct };
   }, [orgSummaryRows]);
 
   const categoryScores = useMemo(() => {
@@ -921,14 +924,14 @@ export function WellbeingDashboard({
                     <SemiGauge value={threeMonthAvg} caption="3-months Avg" />
                   </div>
                   <AreaTrend points={sixMonthTrendPoints} />
-                  <p className="absolute right-0 top-1/2 -translate-y-1/2 text-[11px] font-bold uppercase tracking-wide text-emerald-800 [writing-mode:vertical-rl]">
+                  <p className="absolute right-0 top-1/2 -translate-y-1/2 rotate-180 text-[11px] font-bold uppercase tracking-wide text-emerald-800 [writing-mode:vertical-rl]">
                     &gt;6 is good
                   </p>
                 </div>
               </Panel>
 
               <Panel label="MAU" className="flex-1 !overflow-visible" exportAttr="mau">
-                <div className="mb-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-700 sm:grid-cols-4">
+                <div className="mb-2 grid grid-cols-3 gap-x-2 gap-y-1.5 text-[11px] text-slate-700 sm:grid-cols-6">
                   <div className="text-center">
                     <p className="text-[10px] font-semibold uppercase text-slate-600">Month</p>
                     <p className="font-semibold">{latestLabel}</p>
@@ -940,12 +943,24 @@ export function WellbeingDashboard({
                     <p className="font-semibold">{mau.active.toLocaleString()}</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-[10px] font-semibold uppercase text-slate-600">Enabled</p>
-                    <p className="font-semibold">{mau.registered.toLocaleString()}</p>
-                  </div>
-                  <div className="text-center">
                     <p className="text-[10px] font-semibold uppercase text-slate-600">Active %</p>
                     <p className="font-semibold">{mau.pct == null ? "—" : `${mau.pct}%`}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] font-semibold uppercase text-slate-600">
+                      Repeat Users
+                    </p>
+                    <p className="font-semibold">{mau.repeat.toLocaleString()}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] font-semibold uppercase text-slate-600">Repeat %</p>
+                    <p className="font-semibold">
+                      {mau.repeatPct == null ? "—" : `${mau.repeatPct}%`}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[10px] font-semibold uppercase text-slate-600">Enabled</p>
+                    <p className="font-semibold">{mau.registered.toLocaleString()}</p>
                   </div>
                 </div>
                 <AreaTrend points={sixMonthTrendPoints} />
