@@ -69,6 +69,13 @@ export type DashboardSummaryRow = {
   } | null;
 };
 
+export type DashboardChatMonthlyRow = {
+  year: number;
+  month: number;
+  type: string;
+  sessionCount: number;
+};
+
 type Props = {
   year: number;
   months: number[];
@@ -77,6 +84,7 @@ type Props = {
   categoryRows: DashboardCategoryRow[];
   featureRows: DashboardFeatureRow[];
   orgSummaryRows: DashboardSummaryRow[];
+  chatMonthlyRows?: DashboardChatMonthlyRow[];
 };
 
 function formatMonthsTenure(year: number, months: number[]): string {
@@ -95,24 +103,77 @@ function avg(values: number[]): number | null {
   return Number((values.reduce((a, b) => a + b, 0) / values.length).toFixed(1));
 }
 
+/** Inclusive lookback window ending at selected year/month (handles year wrap). */
+function monthsEndingAt(
+  year: number,
+  month: number,
+  count: number,
+): Array<{ year: number; month: number; label: string; key: string }> {
+  const out: Array<{ year: number; month: number; label: string; key: string }> = [];
+  let y = year;
+  let m = month;
+  for (let i = 0; i < count; i++) {
+    out.unshift({
+      year: y,
+      month: m,
+      label: MONTH_SHORT[m - 1] || `M${m}`,
+      key: `${y}-${m}`,
+    });
+    m -= 1;
+    if (m < 1) {
+      m = 12;
+      y -= 1;
+    }
+  }
+  return out;
+}
+
+/** Make Today Great + Better Week roll up as a single Top Features row. */
+const MTG_FEATURE_PAGES = new Set([
+  "make-today-great",
+  "today-great",
+  "better-week",
+  "better_week",
+  "bw",
+]);
+
+function normalizeFeaturePage(page: string): { page: string; label: string } {
+  const key = String(page || "")
+    .trim()
+    .toLowerCase();
+  if (MTG_FEATURE_PAGES.has(key)) {
+    return { page: "mtg", label: "MTG" };
+  }
+  if (key === "insight" || key === "insights") {
+    return { page: "insight", label: "Trends" };
+  }
+  return { page: key || page, label: "" };
+}
+
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
 }
 
-function riskBarGradient(score: number | null): string {
-  if (score == null) return "#cbd5e1";
-  if (score < 4) return "linear-gradient(90deg, #22c55e, #4ade80)";
-  if (score < 6) return "linear-gradient(90deg, #eab308, #facc15)";
-  if (score < 7.5) return "linear-gradient(90deg, #f97316, #fb923c)";
-  return "linear-gradient(90deg, #ea580c, #ef4444)";
+/**
+ * Solid fill for RISKS from % of users with score ≥7.
+ * Zones match markers at 40% / 70%: Acceptable → Cautiously Neutral → Needs Attention.
+ */
+function riskBarColor(pctAtOrAbove7: number | null): string {
+  if (pctAtOrAbove7 == null) return "#cbd5e1";
+  if (pctAtOrAbove7 < 40) return "#16a34a";
+  if (pctAtOrAbove7 < 70) return "#ca8a04";
+  return "#dc2626";
 }
 
-function driverBarGradient(score: number | null): string {
-  if (score == null) return "#cbd5e1";
-  if (score >= 7) return "linear-gradient(90deg, #15803d, #22c55e)";
-  if (score >= 5) return "linear-gradient(90deg, #ea580c, #eab308)";
-  if (score >= 3.5) return "linear-gradient(90deg, #f97316, #fb923c)";
-  return "linear-gradient(90deg, #dc2626, #ef4444)";
+/**
+ * Solid fill for DRIVERS from % of users with score ≥7.
+ * Zones match markers at 40% / 70%: Needs Attention → Cautiously Neutral → Positive.
+ */
+function driverBarColor(pctAtOrAbove7: number | null): string {
+  if (pctAtOrAbove7 == null) return "#cbd5e1";
+  if (pctAtOrAbove7 < 40) return "#dc2626";
+  if (pctAtOrAbove7 < 70) return "#ca8a04";
+  return "#16a34a";
 }
 
 function Panel({
@@ -135,9 +196,9 @@ function Panel({
     <div
       ref={panelRef}
       {...(exportAttr ? ({ [`data-export-${exportAttr}`]: "true" } as Record<string, string>) : {})}
-      className={`min-h-0 overflow-hidden rounded-md border border-sky-300/80 bg-white shadow-sm ${className}`}
+      className={`flex min-h-0 flex-col overflow-hidden rounded-md border border-sky-300/80 bg-white shadow-sm ${className}`}
     >
-      <div className="relative flex items-center justify-center px-3 pt-2.5 pb-5">
+      <div className="relative flex shrink-0 items-center justify-center px-3 pb-2 pt-2.5">
         <p className="text-center text-[12px] font-semibold tracking-[0.08em] text-slate-800">
           {label}
         </p>
@@ -145,7 +206,7 @@ function Panel({
           <div className="absolute right-3 top-2.5 shrink-0">{headerAction}</div>
         ) : null}
       </div>
-      <div className="min-w-0 flex-1 px-3 pb-3 pt-0">{children}</div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col px-3 pb-3 pt-0">{children}</div>
     </div>
   );
 }
@@ -287,55 +348,56 @@ function AreaTrend({ points }: { points: Array<{ label: string; value: number | 
       </defs>
       {area && <path d={area} fill={`url(#${fillId})`} />}
       {line && <path d={line} fill="none" stroke="#0ea5e9" strokeWidth="2.25" />}
-      {coords.map((c, i) =>
-        c.y == null ? null : (
-          <g key={`${c.label}-${i}`}>
-            <circle cx={c.x} cy={c.y} r="3" fill="#0284c7" />
-            <text
-              x={c.x}
-              y={c.y - 9}
-              textAnchor="middle"
-              fill="#334155"
-              style={{ fontSize: 11, fontWeight: 700 }}
-            >
-              {Number(c.value).toFixed(1)}
-            </text>
-            <text
-              x={c.x}
-              y={h - 2}
-              textAnchor="middle"
-              fill="#64748b"
-              style={{ fontSize: 10, fontWeight: 600 }}
-            >
-              {c.label}
-            </text>
-          </g>
-        ),
-      )}
+      {coords.map((c, i) => (
+        <g key={`${c.label}-${i}`}>
+          {c.y != null && (
+            <>
+              <circle cx={c.x} cy={c.y} r="3" fill="#0284c7" />
+              <text
+                x={c.x}
+                y={c.y - 9}
+                textAnchor="middle"
+                fill="#334155"
+                style={{ fontSize: 11, fontWeight: 700 }}
+              >
+                {Number(c.value).toFixed(1)}
+              </text>
+            </>
+          )}
+          <text
+            x={c.x}
+            y={h - 2}
+            textAnchor="middle"
+            fill="#64748b"
+            style={{ fontSize: 10, fontWeight: 600 }}
+          >
+            {c.label}
+          </text>
+        </g>
+      ))}
     </svg>
   );
 }
 
 type ZoneMeterItem = {
   title: string;
-  score: number | null;
   pctAtOrAbove7: number | null;
-  gradient: string;
+  color: string;
 };
 
-/** Shared 0–10 scale with vertical threshold lines and zone labels. */
+/** Shared 0–100% (≥7 users) scale with vertical threshold lines and zone labels. */
 function ZoneMeterGroup({
   items,
   markers,
   zones,
 }: {
   items: ZoneMeterItem[];
-  /** Marker positions as % of the 0–10 scale (e.g. 40 = score 4). */
+  /** Marker positions as % of users with score ≥7 (e.g. 40 = 40%). */
   markers: Array<{ at: number; color: string }>;
   zones: Array<{ label: string; color: string }>;
 }) {
   return (
-    <div className="space-y-2">
+    <div className="flex h-full min-h-0 flex-col justify-center gap-2">
       <div className="relative space-y-2.5 py-0.5">
         {/* Vertical threshold lines across all bars */}
         {markers.map((m) => (
@@ -348,26 +410,32 @@ function ZoneMeterGroup({
         ))}
 
         {items.map((item) => {
-          const scorePct = item.score == null ? 0 : clamp((item.score / 10) * 100, 0, 100);
+          const barPct = item.pctAtOrAbove7 == null ? 0 : clamp(item.pctAtOrAbove7, 0, 100);
+          const pctLabel = item.pctAtOrAbove7 == null ? "—" : `${item.pctAtOrAbove7.toFixed(1)}%`;
+          // % sits at the right of the full track; white when fill covers that end.
+          const pctOnFill = barPct >= 88;
           return (
             <div key={item.title} className="relative z-0">
-              <div className="h-7 overflow-hidden rounded-md bg-slate-100">
+              <div className="relative h-7 overflow-hidden rounded-md bg-slate-100">
                 <div
-                  className="relative flex h-full min-w-[4.5rem] items-center px-2.5 transition-all"
+                  className="absolute inset-y-0 left-0 flex min-w-[4.5rem] items-center px-2.5 transition-all"
                   style={{
-                    width: `${Math.max(scorePct, item.score == null ? 0 : 18)}%`,
-                    background: item.gradient,
+                    width: `${Math.max(barPct, item.pctAtOrAbove7 == null ? 0 : 14)}%`,
+                    background: item.color,
                   }}
                 >
                   <span className="truncate text-[10px] font-bold uppercase tracking-wide text-white drop-shadow-sm">
                     {item.title}
                   </span>
                 </div>
-              </div>
-              <div className="mt-0.5 flex justify-end text-[10px] text-slate-500">
-                <span>
-                  {item.score == null ? "—" : item.score.toFixed(1)}
-                  {item.pctAtOrAbove7 != null ? ` · ≥7 ${item.pctAtOrAbove7.toFixed(1)}%` : ""}
+                <span
+                  className={`absolute right-2 top-1/2 z-20 -translate-y-1/2 text-[11px] font-bold tabular-nums ${
+                    pctOnFill
+                      ? "text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.55)]"
+                      : "text-slate-900"
+                  }`}
+                >
+                  {pctLabel}
                 </span>
               </div>
             </div>
@@ -376,7 +444,7 @@ function ZoneMeterGroup({
       </div>
 
       {/* Zone labels aligned to marker columns — no mid-word breaks */}
-      <div className="grid grid-cols-3 gap-1 pt-1">
+      <div className="grid grid-cols-3 gap-1 pt-0.5">
         {zones.map((zone) => (
           <p
             key={zone.label}
@@ -399,54 +467,58 @@ export function WellbeingDashboard({
   categoryRows,
   featureRows,
   orgSummaryRows,
+  chatMonthlyRows = [],
 }: Props) {
   const dashboardExportRef = useRef<HTMLDivElement>(null);
   const [exportingDashboard, setExportingDashboard] = useState(false);
 
   const selectedMonths = useMemo(() => [...months].map(Number).sort((a, b) => a - b), [months]);
 
-  const monthsTenure = useMemo(
-    () => formatMonthsTenure(year, selectedMonths),
-    [year, selectedMonths],
-  );
+  // Dashboard always keys off a single selected month (last selected if multiple).
+  const selectedMonth = selectedMonths[selectedMonths.length - 1] || null;
 
-  const latestMonth = selectedMonths[selectedMonths.length - 1] || null;
+  const monthsTenure = useMemo(() => {
+    if (selectedMonth == null) return String(year);
+    return formatMonthsTenure(year, [selectedMonth]);
+  }, [year, selectedMonth]);
 
-  const wellbeingByMonth = useMemo(() => {
-    const map = new Map<number, number[]>();
+  const wellbeingByYearMonth = useMemo(() => {
+    const map = new Map<string, number[]>();
     for (const row of wellbeingRows) {
       if (row.wellbeingIndex == null) continue;
-      const list = map.get(row.month) || [];
+      const key = `${row.year}-${row.month}`;
+      const list = map.get(key) || [];
       list.push(row.wellbeingIndex);
-      map.set(row.month, list);
+      map.set(key, list);
     }
     return map;
   }, [wellbeingRows]);
 
-  const trendPoints = useMemo(() => {
-    const monthsForTrend =
-      selectedMonths.length >= 2
-        ? selectedMonths
-        : Array.from({ length: 6 }, (_, i) => {
-            const m = (latestMonth || new Date().getMonth() + 1) - 5 + i;
-            return m < 1 ? m + 12 : m;
-          });
-    return monthsForTrend.map((m) => ({
-      label: MONTH_SHORT[m - 1] || `M${m}`,
-      value: avg(wellbeingByMonth.get(m) || []),
-    }));
-  }, [selectedMonths, latestMonth, wellbeingByMonth]);
+  const valueFor = useCallback(
+    (y: number, m: number) => avg(wellbeingByYearMonth.get(`${y}-${m}`) || []),
+    [wellbeingByYearMonth],
+  );
 
-  const latestWellbeing = avg(wellbeingByMonth.get(latestMonth || -1) || []);
+  /** 6-month chart: selected month + 5 prior months. */
+  const sixMonthTrendPoints = useMemo(() => {
+    if (selectedMonth == null) return [];
+    return monthsEndingAt(year, selectedMonth, 6).map((slot) => ({
+      label: slot.label,
+      value: valueFor(slot.year, slot.month),
+    }));
+  }, [year, selectedMonth, valueFor]);
+
+  const latestWellbeing = selectedMonth == null ? null : valueFor(year, selectedMonth);
+
   const threeMonthAvg = useMemo(() => {
-    const last3 = selectedMonths.slice(-3);
+    if (selectedMonth == null) return null;
     const vals: number[] = [];
-    for (const m of last3) {
-      const a = avg(wellbeingByMonth.get(m) || []);
+    for (const slot of monthsEndingAt(year, selectedMonth, 3)) {
+      const a = valueFor(slot.year, slot.month);
       if (a != null) vals.push(a);
     }
     return avg(vals);
-  }, [selectedMonths, wellbeingByMonth]);
+  }, [year, selectedMonth, valueFor]);
 
   const mau = useMemo(() => {
     let registered = 0;
@@ -461,15 +533,13 @@ export function WellbeingDashboard({
 
   const categoryScores = useMemo(() => {
     const pick = (key: string) => {
-      const scores: number[] = [];
       let usersWithData = 0;
       let usersAtOrAbove = 0;
       let hasPct = false;
       for (const row of categoryRows) {
-        if (latestMonth != null && row.month !== latestMonth) continue;
+        if (selectedMonth != null && (row.month !== selectedMonth || row.year !== year)) continue;
         const metric = row.categories[key];
         if (!metric) continue;
-        if (metric.avgScore != null) scores.push(metric.avgScore);
         const withData = metric.usersWithData || 0;
         usersWithData += withData;
         if (metric.usersAtOrAboveThreshold != null) {
@@ -481,7 +551,6 @@ export function WellbeingDashboard({
         }
       }
       return {
-        score: avg(scores),
         pctAtOrAbove7:
           hasPct && usersWithData > 0
             ? Number(((usersAtOrAbove / usersWithData) * 100).toFixed(1))
@@ -494,34 +563,86 @@ export function WellbeingDashboard({
       belonging: pick("belonging"),
       energy: pick("energy"),
     };
-  }, [categoryRows, latestMonth]);
+  }, [categoryRows, selectedMonth, year]);
 
   const topFeatures = useMemo(() => {
-    // Exclude shell/session pages and error keys (e.g. error, error_013) from Top Features.
-    const EXCLUDED_TOP_FEATURE_PAGES = new Set(["home", "app-open", "error"]);
+    // Exclude shell/session pages, dashboard/sliders, personalize (own panel), and errors.
+    const EXCLUDED_TOP_FEATURE_PAGES = new Set([
+      "home",
+      "app-open",
+      "error",
+      "dashboard",
+      "personalize",
+    ]);
     const byPage = new Map<string, { label: string; users: number; views: number }>();
     for (const row of featureRows) {
-      if (latestMonth != null && row.month !== latestMonth) continue;
+      if (selectedMonth != null && (row.month !== selectedMonth || row.year !== year)) continue;
       const pageKey = String(row.page || "").toLowerCase();
       if (EXCLUDED_TOP_FEATURE_PAGES.has(pageKey) || pageKey.startsWith("error")) continue;
-      const existing = byPage.get(row.page) || { label: row.label, users: 0, views: 0 };
+      const normalized = normalizeFeaturePage(row.page);
+      const page = normalized.page;
+      const label = normalized.label || row.label;
+      const existing = byPage.get(page) || { label, users: 0, views: 0 };
       existing.users += row.usersWithFeature || 0;
       existing.views += row.totalViews || 0;
-      byPage.set(row.page, existing);
+      if (normalized.label) existing.label = normalized.label;
+      byPage.set(page, existing);
     }
+
+    // Chat = total User_Chat_session sessions for the selected month.
+    let lifeCoachSessions = 0;
+    for (const row of chatMonthlyRows) {
+      if (selectedMonth != null && (row.month !== selectedMonth || row.year !== year)) continue;
+      lifeCoachSessions += row.sessionCount || 0;
+    }
+    if (lifeCoachSessions > 0) {
+      byPage.set("lifecoach-chat", {
+        label: "Chat",
+        users: lifeCoachSessions,
+        views: 0,
+      });
+    }
+
     return [...byPage.entries()]
       .map(([page, v]) => ({ page, ...v }))
       .sort((a, b) => b.users - a.users)
       .slice(0, 10);
-  }, [featureRows, latestMonth]);
+  }, [featureRows, chatMonthlyRows, selectedMonth, year]);
 
   const maxFeatureUsers = Math.max(...topFeatures.map((f) => f.users), 1);
+  /**
+   * Feature / Personalize bar palette (light fill + dark label).
+   * Swap FEATURE_BAR_PALETTE to try: "teal" | "slate" | "indigo" | "mint" | "sky"
+   */
+  const FEATURE_BAR_PALETTES = {
+    teal: { fill: "#7eb6b5", text: "#1a3f3e" },
+    slate: { fill: "#a8b4c4", text: "#243447" },
+    indigo: { fill: "#a8b0e0", text: "#2a2f66" },
+    mint: { fill: "#8fc9b0", text: "#1b4332" },
+    sky: { fill: "#9ec9e6", text: "#1e3a5f" },
+  } as const;
+  const FEATURE_BAR_PALETTE: keyof typeof FEATURE_BAR_PALETTES = "mint";
+  const FEATURE_BAR_COLOR = FEATURE_BAR_PALETTES[FEATURE_BAR_PALETTE].fill;
+  const FEATURE_BAR_TEXT = FEATURE_BAR_PALETTES[FEATURE_BAR_PALETTE].text;
 
+  /** Rolling 6-month window ending at selected month (same as trend charts). */
+  const sixMonthWindow = useMemo(() => {
+    if (selectedMonth == null) return [] as Array<{ year: number; month: number }>;
+    return monthsEndingAt(year, selectedMonth, 6);
+  }, [year, selectedMonth]);
+
+  const inSixMonthWindow = useCallback(
+    (rowYear: number, rowMonth: number) =>
+      sixMonthWindow.some((slot) => slot.year === rowYear && slot.month === rowMonth),
+    [sixMonthWindow],
+  );
+
+  /** Effectiveness over rolling 6 months of helpful / not-helpful feedback. */
   const effectiveness = useMemo(() => {
     let helpful = 0;
     let notHelpful = 0;
     for (const row of wellbeingRows) {
-      if (latestMonth != null && row.month !== latestMonth) continue;
+      if (!inSixMonthWindow(row.year, row.month)) continue;
       helpful += row.helpful || 0;
       notHelpful += row.notHelpful || 0;
     }
@@ -531,16 +652,26 @@ export function WellbeingDashboard({
       notHelpful,
       pct: total > 0 ? Number(((helpful / total) * 100).toFixed(1)) : null,
     };
-  }, [wellbeingRows, latestMonth]);
+  }, [wellbeingRows, inSixMonthWindow]);
 
-  const latestLabel = latestMonth ? MONTH_SHORT[latestMonth - 1] : "—";
-  const featureStyles = [
-    { bar: "#2563eb", soft: "#dbeafe", text: "#1e40af" },
-    { bar: "#059669", soft: "#d1fae5", text: "#065f46" },
-    { bar: "#7c3aed", soft: "#ede9fe", text: "#5b21b6" },
-    { bar: "#d97706", soft: "#fef3c7", text: "#92400e" },
-    { bar: "#0891b2", soft: "#cffafe", text: "#155e75" },
-  ];
+  /** Personalize adoption over rolling 6 months vs MAU active users. */
+  const personalize = useMemo(() => {
+    let users = 0;
+    for (const row of featureRows) {
+      if (!inSixMonthWindow(row.year, row.month)) continue;
+      const key = String(row.page || "")
+        .trim()
+        .toLowerCase();
+      if (key !== "personalize") continue;
+      users += row.usersWithFeature || 0;
+    }
+    const active = mau.active;
+    const rawPct = active > 0 ? (users / active) * 100 : null;
+    const pct = rawPct == null ? null : Number(Math.min(rawPct, 100).toFixed(1));
+    return { users, active, pct };
+  }, [featureRows, inSixMonthWindow, mau.active]);
+
+  const latestLabel = selectedMonth ? MONTH_SHORT[selectedMonth - 1] : "—";
 
   const handleExportDashboard = useCallback(async () => {
     const node = dashboardExportRef.current;
@@ -600,8 +731,9 @@ export function WellbeingDashboard({
         remember(mainRow);
         mainRow.style.flex = "0 0 auto";
         mainRow.style.minHeight = "0";
-        mainRow.style.alignItems = "start";
-        // PDF widths: Wellbeing/MAU 35% | Risks/Drivers/Effectiveness 35% | Top Features 30%
+        // Stretch columns so Effectiveness / Personalize bottoms can align.
+        mainRow.style.alignItems = "stretch";
+        // PDF widths: Wellbeing/MAU 35% | Risks/Drivers/Effectiveness 35% | Features+Personalize 30%
         // Use fr so gap doesn't push past 100% width.
         mainRow.style.display = "grid";
         mainRow.style.gridTemplateColumns = "minmax(0, 35fr) minmax(0, 35fr) minmax(0, 30fr)";
@@ -618,7 +750,6 @@ export function WellbeingDashboard({
         remember(featuresPanel);
         featuresPanel.style.flex = "1 1 auto";
         featuresPanel.style.minHeight = "0";
-        featuresPanel.style.height = "100%";
         featuresPanel.style.display = "flex";
         featuresPanel.style.flexDirection = "column";
       }
@@ -634,6 +765,9 @@ export function WellbeingDashboard({
       }
       if (midCol) {
         remember(midCol);
+        midCol.style.display = "flex";
+        midCol.style.flexDirection = "column";
+        midCol.style.minHeight = "0";
         midCol.style.width = "auto";
         midCol.style.maxWidth = "none";
         midCol.style.gridColumn = "2 / 3";
@@ -773,16 +907,20 @@ export function WellbeingDashboard({
               </Button>
             </div>
           </div>
-          <div className="grid grid-cols-12 gap-3" data-export-main-row>
-            {/* Left: Wellbeing Index + MAU */}
-            <div className="col-span-3 flex flex-col gap-3" data-export-left-col>
+          <div
+            className="grid gap-3"
+            style={{ gridTemplateColumns: "minmax(0, 35fr) minmax(0, 35fr) minmax(0, 30fr)" }}
+            data-export-main-row
+          >
+            {/* Left: Wellbeing Index + MAU (35%) */}
+            <div className="flex min-w-0 flex-col gap-3" data-export-left-col>
               <Panel label="WELLBEING INDEX" className="!overflow-visible">
                 <div className="relative mb-1 pr-5">
                   <div className="flex items-start justify-center gap-10">
                     <SemiGauge value={latestWellbeing} caption={latestLabel} />
                     <SemiGauge value={threeMonthAvg} caption="3-months Avg" />
                   </div>
-                  <AreaTrend points={trendPoints} />
+                  <AreaTrend points={sixMonthTrendPoints} />
                   <p className="absolute right-0 top-1/2 -translate-y-1/2 text-[11px] font-bold uppercase tracking-wide text-emerald-800 [writing-mode:vertical-rl]">
                     &gt;6 is good
                   </p>
@@ -810,26 +948,24 @@ export function WellbeingDashboard({
                     <p className="font-semibold">{mau.pct == null ? "—" : `${mau.pct}%`}</p>
                   </div>
                 </div>
-                <AreaTrend points={trendPoints} />
+                <AreaTrend points={sixMonthTrendPoints} />
               </Panel>
             </div>
 
-            {/* Middle: Risks + Drivers + Effectiveness */}
-            <div className="col-span-4 flex flex-col gap-3" data-export-mid-col>
-              <Panel label="RISKS">
+            {/* Middle: Risks + Drivers share space evenly; Effectiveness matches Personalize height */}
+            <div className="flex min-h-0 min-w-0 flex-col gap-3" data-export-mid-col>
+              <Panel label="RISKS" className="flex-1">
                 <ZoneMeterGroup
                   items={[
                     {
                       title: "Burnout Risk",
-                      score: categoryScores.burnoutRisk.score,
                       pctAtOrAbove7: categoryScores.burnoutRisk.pctAtOrAbove7,
-                      gradient: riskBarGradient(categoryScores.burnoutRisk.score),
+                      color: riskBarColor(categoryScores.burnoutRisk.pctAtOrAbove7),
                     },
                     {
                       title: "Stress",
-                      score: categoryScores.stress.score,
                       pctAtOrAbove7: categoryScores.stress.pctAtOrAbove7,
-                      gradient: riskBarGradient(categoryScores.stress.score),
+                      color: riskBarColor(categoryScores.stress.pctAtOrAbove7),
                     },
                   ]}
                   markers={[
@@ -844,20 +980,18 @@ export function WellbeingDashboard({
                 />
               </Panel>
 
-              <Panel label="DRIVERS">
+              <Panel label="DRIVERS" className="flex-1">
                 <ZoneMeterGroup
                   items={[
                     {
                       title: "Belonging",
-                      score: categoryScores.belonging.score,
                       pctAtOrAbove7: categoryScores.belonging.pctAtOrAbove7,
-                      gradient: driverBarGradient(categoryScores.belonging.score),
+                      color: driverBarColor(categoryScores.belonging.pctAtOrAbove7),
                     },
                     {
                       title: "Energy",
-                      score: categoryScores.energy.score,
                       pctAtOrAbove7: categoryScores.energy.pctAtOrAbove7,
-                      gradient: driverBarGradient(categoryScores.energy.score),
+                      color: driverBarColor(categoryScores.energy.pctAtOrAbove7),
                     },
                   ]}
                   markers={[
@@ -872,10 +1006,16 @@ export function WellbeingDashboard({
                 />
               </Panel>
 
-              <Panel label="Effectiveness">
-                <div className="space-y-2">
+              <Panel
+                label="Effectiveness"
+                className="min-h-[6.75rem] shrink-0"
+                exportAttr="effectiveness"
+              >
+                <div className="flex h-full flex-col justify-center space-y-2">
                   <div className="flex items-center justify-between gap-2 text-[11px]">
-                    <span className="font-medium text-slate-700">Helpful vs Not Helpful</span>
+                    <span className="font-medium text-slate-700">
+                      Helpful vs Not Helpful · 6 mo
+                    </span>
                     <span className="shrink-0 font-semibold text-slate-800">
                       {effectiveness.pct == null ? "—" : `${effectiveness.pct}%`}
                     </span>
@@ -887,7 +1027,7 @@ export function WellbeingDashboard({
                           className="h-full transition-all"
                           style={{
                             width: `${effectiveness.pct}%`,
-                            background: "#22c55e",
+                            background: "#059669",
                           }}
                           title={`Helpful: ${effectiveness.helpful.toLocaleString()}`}
                         />
@@ -895,7 +1035,7 @@ export function WellbeingDashboard({
                           className="h-full transition-all"
                           style={{
                             width: `${100 - effectiveness.pct}%`,
-                            background: "#f43f5e",
+                            background: "#be123c",
                           }}
                           title={`Not Helpful: ${effectiveness.notHelpful.toLocaleString()}`}
                         />
@@ -904,14 +1044,14 @@ export function WellbeingDashboard({
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
                     <span className="inline-flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-sm bg-emerald-500" />
+                      <span className="h-2 w-2 rounded-sm" style={{ background: "#059669" }} />
                       Helpful{" "}
                       <span className="font-semibold text-slate-700">
                         {effectiveness.helpful.toLocaleString()}
                       </span>
                     </span>
                     <span className="inline-flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-sm bg-rose-500" />
+                      <span className="h-2 w-2 rounded-sm" style={{ background: "#be123c" }} />
                       Not Helpful{" "}
                       <span className="font-semibold text-slate-700">
                         {effectiveness.notHelpful.toLocaleString()}
@@ -922,45 +1062,41 @@ export function WellbeingDashboard({
               </Panel>
             </div>
 
-            {/* Right: Top Features */}
-            <div className="col-span-5 flex flex-col gap-3" data-export-right-col>
+            {/* Right: Top Features fills; Personalize same height band as Effectiveness */}
+            <div className="flex min-h-0 min-w-0 flex-col gap-3" data-export-right-col>
               <Panel label="Top Features" className="flex-1" exportAttr="features">
-                <div className="mb-3 flex items-baseline justify-end gap-2">
-                  <p className="text-[10px] font-medium text-slate-500">Top 10 · by users</p>
-                </div>
                 {topFeatures.length === 0 ? (
                   <p className="py-6 text-center text-xs text-slate-400">
                     No feature usage for selection
                   </p>
                 ) : (
-                  <div className="flex flex-col justify-between gap-3.5">
-                    {topFeatures.map((f, i) => {
-                      const style = featureStyles[i % featureStyles.length];
-                      const pct = Math.max(6, (f.users / maxFeatureUsers) * 100);
+                  <div className="flex h-full flex-col justify-between gap-2">
+                    {topFeatures.map((f) => {
+                      const pct = Math.max(18, (f.users / maxFeatureUsers) * 100);
                       return (
-                        <div key={f.page} className="flex items-center gap-2.5">
-                          <span
-                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold"
-                            style={{ background: style.soft, color: style.text }}
+                        <div
+                          key={f.page}
+                          className="relative h-7 overflow-hidden rounded-md bg-slate-100"
+                        >
+                          <div
+                            className="absolute inset-y-0 left-0 flex min-w-[5.5rem] items-center px-2.5 transition-all"
+                            style={{
+                              width: `${pct}%`,
+                              background: FEATURE_BAR_COLOR,
+                            }}
                           >
-                            {i + 1}
-                          </span>
-                          <span
-                            className="w-[7.5rem] shrink-0 truncate text-[12px] font-semibold text-slate-800"
-                            title={f.label}
-                          >
-                            {f.label}
-                          </span>
-                          <div className="h-3.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-200/80">
-                            <div
-                              className="h-full rounded-full transition-all"
-                              style={{
-                                width: `${pct}%`,
-                                background: `linear-gradient(90deg, ${style.bar}cc, ${style.bar})`,
-                              }}
-                            />
+                            <span
+                              className="truncate text-[11px] font-semibold"
+                              style={{ color: FEATURE_BAR_TEXT }}
+                              title={f.label}
+                            >
+                              {f.label}
+                            </span>
                           </div>
-                          <span className="w-10 shrink-0 text-right text-[12px] font-bold tabular-nums text-slate-700">
+                          <span
+                            className="absolute right-2 top-1/2 z-20 -translate-y-1/2 text-[11px] font-bold tabular-nums"
+                            style={{ color: FEATURE_BAR_TEXT }}
+                          >
                             {f.users.toLocaleString()}
                           </span>
                         </div>
@@ -968,6 +1104,45 @@ export function WellbeingDashboard({
                     })}
                   </div>
                 )}
+              </Panel>
+
+              <Panel
+                label="Personalize"
+                className="min-h-[6.75rem] shrink-0"
+                exportAttr="personalize"
+              >
+                <div className="flex h-full flex-col justify-center space-y-1.5">
+                  <div className="relative h-7 overflow-hidden rounded-md bg-slate-100">
+                    <div
+                      className="absolute inset-y-0 left-0 flex min-w-[5.5rem] items-center px-2.5 transition-all"
+                      style={{
+                        width: `${Math.max(
+                          personalize.pct == null ? 0 : clamp(personalize.pct, 0, 100),
+                          personalize.pct == null ? 0 : 18,
+                        )}%`,
+                        background: FEATURE_BAR_COLOR,
+                      }}
+                    >
+                      <span
+                        className="truncate text-[10px] font-bold uppercase tracking-wide"
+                        style={{ color: FEATURE_BAR_TEXT }}
+                      >
+                        Personalize
+                      </span>
+                    </div>
+                    <span
+                      className="absolute right-2 top-1/2 z-20 -translate-y-1/2 text-[11px] font-bold tabular-nums"
+                      style={{ color: FEATURE_BAR_TEXT }}
+                    >
+                      {personalize.pct == null
+                        ? "—"
+                        : `${personalize.pct}% · ${personalize.users.toLocaleString()}`}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Rolling 6 mo · users · % of active users
+                  </p>
+                </div>
               </Panel>
             </div>
           </div>
