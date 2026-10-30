@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { WellbeingDashboard } from "@/components/client-report/WellbeingDashboard";
 import { Layout } from "@/components/layout";
 import {
   Button,
@@ -1183,6 +1184,18 @@ export default function WellbeingAnalyticsPage() {
         </Card>
 
         {hasLoaded && (
+          <WellbeingDashboard
+            year={Number(year) || currentYear}
+            months={months.map(Number)}
+            platformName={platformOptions.find((p) => p.key === platform)?.name || platform}
+            wellbeingRows={rows}
+            categoryRows={categoryRows}
+            featureRows={featureUsageRows}
+            orgSummaryRows={orgSummaryRows}
+          />
+        )}
+
+        {hasLoaded && (
           <Card>
             <CardHeader>
               <CardTitle>Current Summary</CardTitle>
@@ -1294,12 +1307,6 @@ export default function WellbeingAnalyticsPage() {
                         Brew Count
                       </th>
                       <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
-                        <HeaderWithInfo label="Star Rating Avg" infoKey="starRating" />
-                      </th>
-                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
-                        <HeaderWithInfo label="Star Rating Count" infoKey="starRatingCount" />
-                      </th>
-                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
                         Gratitude
                       </th>
                       <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
@@ -1323,7 +1330,65 @@ export default function WellbeingAnalyticsPage() {
                       <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
                         <HeaderWithInfo label="Effectiveness %" infoKey="effectiveness" />
                       </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        <HeaderWithInfo label="Star Rating Avg" infoKey="starRating" />
+                      </th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                        <HeaderWithInfo label="Star Rating Count" infoKey="starRatingCount" />
+                      </th>
                     </tr>
+                    {wellbeingTableTotals && rows.length > 0 && (
+                      <tr className="border-y-2 border-[#1f00a3]/40 bg-[#1f00a3]/12">
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          Total
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          —
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          —
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatMetric(wellbeingTableTotals.wellbeingIndex)}
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatMetric(wellbeingTableTotals.brew)}
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatCount(wellbeingTableTotals.brewCount)}
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatMetric(wellbeingTableTotals.gratitude)}
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatCount(wellbeingTableTotals.gratitudeCount)}
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatMetric(wellbeingTableTotals.mm)}
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatCount(wellbeingTableTotals.mmCount)}
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatCount(wellbeingTableTotals.totalCount)}
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatCount(wellbeingTableTotals.helpful)}
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatCount(wellbeingTableTotals.notHelpful)}
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatPercent(wellbeingTableTotals.effectiveness)}
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatMetric(wellbeingTableTotals.starRating)}
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatCount(wellbeingTableTotals.starRatingCount)}
+                        </th>
+                      </tr>
+                    )}
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
                     {rows.length === 0 ? (
@@ -1356,12 +1421,6 @@ export default function WellbeingAnalyticsPage() {
                               {formatCount(row.brewCount)}
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 text-gray-900">
-                              {formatMetric(row.starRating)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 text-gray-900">
-                              {formatCount(row.starRatingCount)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 text-gray-900">
                               {formatMetric(row.gratitude)}
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 text-gray-900">
@@ -1385,60 +1444,14 @@ export default function WellbeingAnalyticsPage() {
                             <td className="whitespace-nowrap px-3 py-2 text-gray-900">
                               {formatPercent(row.effectiveness)}
                             </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                              {formatMetric(row.starRating)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                              {formatCount(row.starRatingCount)}
+                            </td>
                           </tr>
                         ))}
-                        {wellbeingTableTotals && (
-                          <tr className="sticky bottom-0 z-[5] border-y-2 border-[#1f00a3]/40 bg-[#1f00a3]/12">
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              Total
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              —
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              —
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatMetric(wellbeingTableTotals.wellbeingIndex)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatMetric(wellbeingTableTotals.brew)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatCount(wellbeingTableTotals.brewCount)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatMetric(wellbeingTableTotals.starRating)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatCount(wellbeingTableTotals.starRatingCount)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatMetric(wellbeingTableTotals.gratitude)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatCount(wellbeingTableTotals.gratitudeCount)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatMetric(wellbeingTableTotals.mm)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatCount(wellbeingTableTotals.mmCount)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatCount(wellbeingTableTotals.totalCount)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatCount(wellbeingTableTotals.helpful)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatCount(wellbeingTableTotals.notHelpful)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatPercent(wellbeingTableTotals.effectiveness)}
-                            </td>
-                          </tr>
-                        )}
                       </>
                     )}
                   </tbody>
@@ -1500,6 +1513,40 @@ export default function WellbeingAnalyticsPage() {
                       ))}
                       <th className="px-3 py-1" />
                     </tr>
+                    {driverTableTotals && driverRows.length > 0 && (
+                      <tr className="border-y-2 border-[#1f00a3]/40 bg-[#1f00a3]/12">
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          —
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          Total
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          —
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          —
+                        </th>
+                        {DRIVER_ORDER.map((key) => {
+                          const metric = driverTableTotals.drivers[key];
+                          return (
+                            <Fragment key={`thead-total-driver-${key}`}>
+                              <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                                {metric?.avgScore == null || Number.isNaN(metric.avgScore)
+                                  ? "—"
+                                  : Number(metric.avgScore).toFixed(2)}
+                              </th>
+                              <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                                {formatCount(metric?.usersWithData)}
+                              </th>
+                            </Fragment>
+                          );
+                        })}
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatCount(driverTableTotals.orgUsers)}
+                        </th>
+                      </tr>
+                    )}
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
                     {driverRows.length === 0 ? (
@@ -1548,40 +1595,6 @@ export default function WellbeingAnalyticsPage() {
                             </td>
                           </tr>
                         ))}
-                        {driverTableTotals && (
-                          <tr className="sticky bottom-0 z-[5] border-y-2 border-[#1f00a3]/40 bg-[#1f00a3]/12">
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              —
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              Total
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              —
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              —
-                            </td>
-                            {DRIVER_ORDER.map((key) => {
-                              const metric = driverTableTotals.drivers[key];
-                              return (
-                                <Fragment key={`total-driver-${key}`}>
-                                  <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                                    {metric?.avgScore == null
-                                      ? "—"
-                                      : Number(metric.avgScore).toFixed(2)}
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                                    {formatCount(metric?.usersWithData)}
-                                  </td>
-                                </Fragment>
-                              );
-                            })}
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatCount(driverTableTotals.orgUsers)}
-                            </td>
-                          </tr>
-                        )}
                       </>
                     )}
                   </tbody>
@@ -1653,6 +1666,45 @@ export default function WellbeingAnalyticsPage() {
                       ))}
                       <th className="px-3 py-1" />
                     </tr>
+                    {categoryTableTotals && categoryRows.length > 0 && (
+                      <tr className="border-y-2 border-[#1f00a3]/40 bg-[#1f00a3]/12">
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          —
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          Total
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          —
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          —
+                        </th>
+                        {CATEGORY_ORDER.map((key) => {
+                          const metric = categoryTableTotals.categories[key];
+                          return (
+                            <Fragment key={`thead-total-category-${key}`}>
+                              <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                                {metric?.avgScore == null || Number.isNaN(metric.avgScore)
+                                  ? "—"
+                                  : Number(metric.avgScore).toFixed(2)}
+                              </th>
+                              <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                                {formatCount(metric?.usersWithData)}
+                              </th>
+                              <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                                {metric?.pctAtOrAboveThreshold == null
+                                  ? "—"
+                                  : `${Number(metric.pctAtOrAboveThreshold).toFixed(1)}%`}
+                              </th>
+                            </Fragment>
+                          );
+                        })}
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatCount(categoryTableTotals.orgUsers)}
+                        </th>
+                      </tr>
+                    )}
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
                     {categoryRows.length === 0 ? (
@@ -1706,45 +1758,6 @@ export default function WellbeingAnalyticsPage() {
                             </td>
                           </tr>
                         ))}
-                        {categoryTableTotals && (
-                          <tr className="sticky bottom-0 z-[5] border-y-2 border-[#1f00a3]/40 bg-[#1f00a3]/12">
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              —
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              Total
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              —
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              —
-                            </td>
-                            {CATEGORY_ORDER.map((key) => {
-                              const metric = categoryTableTotals.categories[key];
-                              return (
-                                <Fragment key={`total-category-${key}`}>
-                                  <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                                    {metric?.avgScore == null
-                                      ? "—"
-                                      : Number(metric.avgScore).toFixed(2)}
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                                    {formatCount(metric?.usersWithData)}
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                                    {metric?.pctAtOrAboveThreshold == null
-                                      ? "—"
-                                      : `${Number(metric.pctAtOrAboveThreshold).toFixed(1)}%`}
-                                  </td>
-                                </Fragment>
-                              );
-                            })}
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatCount(categoryTableTotals.orgUsers)}
-                            </td>
-                          </tr>
-                        )}
                       </>
                     )}
                   </tbody>
@@ -1796,6 +1809,37 @@ export default function WellbeingAnalyticsPage() {
                         Org users
                       </th>
                     </tr>
+                    {featureUsageTableTotals && featureUsageRows.length > 0 && (
+                      <tr className="border-y-2 border-[#1f00a3]/40 bg-[#1f00a3]/12">
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          —
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          Total
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          —
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          —
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          —
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          —
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatCount(featureUsageTableTotals.usersWithFeature)}
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatCount(featureUsageTableTotals.totalViews)}
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                          {formatCount(featureUsageTableTotals.orgUsers)}
+                        </th>
+                      </tr>
+                    )}
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
                     {featureUsageRows.length === 0 ? (
@@ -1838,37 +1882,6 @@ export default function WellbeingAnalyticsPage() {
                             </td>
                           </tr>
                         ))}
-                        {featureUsageTableTotals && (
-                          <tr className="sticky bottom-0 z-[5] border-y-2 border-[#1f00a3]/40 bg-[#1f00a3]/12">
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              —
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              Total
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              —
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              —
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              —
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              —
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatCount(featureUsageTableTotals.usersWithFeature)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatCount(featureUsageTableTotals.totalViews)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-sm font-bold text-[#1f00a3]">
-                              {formatCount(featureUsageTableTotals.orgUsers)}
-                            </td>
-                          </tr>
-                        )}
                       </>
                     )}
                   </tbody>

@@ -351,6 +351,7 @@ export default function OrganizationAnalyticsPage() {
 
   const [loading, setLoading] = useState(false);
   const [polling, setPolling] = useState(false);
+  const [refreshingSummary, setRefreshingSummary] = useState(false);
   const [error, setError] = useState("");
   const [tenantBatchProgress, setTenantBatchProgress] = useState<{
     current: number;
@@ -563,7 +564,7 @@ export default function OrganizationAnalyticsPage() {
   };
 
   const fetchAnalytics = useCallback(
-    async (opts?: { silent?: boolean; tIds?: string[] }) => {
+    async (opts?: { silent?: boolean; tIds?: string[]; forceSummaryRefresh?: boolean }) => {
       if (!platform || selectedOrgs.length === 0 || !year || !weeks.length) {
         setError("Select platform, one or more tenants, year, and at least one week");
         return null;
@@ -601,6 +602,7 @@ export default function OrganizationAnalyticsPage() {
               weeks: selectedWeeks,
               includeSummary: true,
               trigger: !opts?.silent,
+              ...(opts?.forceSummaryRefresh ? { forceSummaryRefresh: true } : {}),
             },
           );
 
@@ -700,6 +702,33 @@ export default function OrganizationAnalyticsPage() {
   const handleConfirmLargeSelection = async () => {
     setShowLargeSelectionAlert(false);
     await runLoad();
+  };
+
+  const handleRefreshSummary = async (tIds?: string[]) => {
+    if (!platform || selectedOrgs.length === 0 || !year || !weeks.length) {
+      setError("Select platform, one or more tenants, year, and at least one week");
+      return;
+    }
+    if (refreshingSummary || loading) return;
+    setRefreshingSummary(true);
+    stopPolling();
+    try {
+      const data = await fetchAnalytics({
+        forceSummaryRefresh: true,
+        ...(tIds?.length ? { tIds } : {}),
+      });
+      if (!data) {
+        stopPolling();
+        return;
+      }
+      if (stillGeneratingFromResults(data)) {
+        startPolling();
+      } else {
+        stopPolling();
+      }
+    } finally {
+      setRefreshingSummary(false);
+    }
   };
 
   useEffect(() => {
@@ -994,11 +1023,26 @@ export default function OrganizationAnalyticsPage() {
               <CardHeader>
                 <div className="flex items-center justify-between gap-4">
                   <CardTitle>Current Summary</CardTitle>
-                  {!isGenerating && results.length > 0 && (
-                    <OrgAnalyticsExportButton
-                      getPayload={getExcelExportPayload}
-                      onError={handleExportError}
-                    />
+                  {results.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        loading={refreshingSummary}
+                        disabled={isGenerating && !refreshingSummary}
+                        onClick={() => handleRefreshSummary()}
+                        title="Force regenerate summary for the loaded tenants"
+                      >
+                        Refresh summary
+                      </Button>
+                      {!isGenerating && (
+                        <OrgAnalyticsExportButton
+                          getPayload={getExcelExportPayload}
+                          onError={handleExportError}
+                        />
+                      )}
+                    </div>
                   )}
                 </div>
               </CardHeader>
@@ -1064,20 +1108,41 @@ export default function OrganizationAnalyticsPage() {
                                 key={col.key}
                                 className="whitespace-nowrap px-3 py-2 text-left text-gray-900"
                               >
-                                {col.key === "status" && typeof value === "string"
-                                  ? renderStatusBadge(
-                                      value,
-                                      isGenerating &&
-                                        result.response.triggered &&
-                                        value !== "failed",
-                                    )
-                                  : typeof value === "number"
-                                    ? PERCENT_COLUMN_KEYS.has(col.key)
-                                      ? formatPercent(value)
-                                      : formatNumber(value)
-                                    : value == null
-                                      ? "—"
-                                      : String(value)}
+                                {col.key === "orgName" ? (
+                                  <div className="inline-flex items-center gap-2">
+                                    <span>{value == null ? "—" : String(value)}</span>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="!h-6 !px-2 !text-[11px]"
+                                      loading={refreshingSummary}
+                                      disabled={isGenerating && !refreshingSummary}
+                                      title="Force regenerate summary for this tenant"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        void handleRefreshSummary([result.tId]);
+                                      }}
+                                    >
+                                      Refresh
+                                    </Button>
+                                  </div>
+                                ) : col.key === "status" && typeof value === "string" ? (
+                                  renderStatusBadge(
+                                    value,
+                                    isGenerating && result.response.triggered && value !== "failed",
+                                  )
+                                ) : typeof value === "number" ? (
+                                  PERCENT_COLUMN_KEYS.has(col.key) ? (
+                                    formatPercent(value)
+                                  ) : (
+                                    formatNumber(value)
+                                  )
+                                ) : value == null ? (
+                                  "—"
+                                ) : (
+                                  String(value)
+                                )}
                               </td>
                             );
                           })}
