@@ -235,6 +235,53 @@ interface OrgSummaryResult {
   status: string;
 }
 
+interface ChatMonthlyRow {
+  year: number;
+  month: number;
+  type: string;
+  sessionCount: number;
+  totalTurns: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheCreationTokens: number;
+  uniqueUsers: number;
+}
+
+interface ChatMonthlyResponse {
+  records: ChatMonthlyRow[];
+}
+
+const CHAT_TYPE_LABELS: Record<string, string> = {
+  brew: "Brew",
+  "mindful-minute": "Mindful Minute",
+  byb: "BYB",
+  "quick-jl": "Quick JL",
+  "today-great": "Make Today Great",
+};
+
+const mergeChatMonthlyRows = (rows: ChatMonthlyRow[]): ChatMonthlyRow[] => {
+  const map = new Map<string, ChatMonthlyRow>();
+  for (const row of rows) {
+    const key = `${row.year}-${row.month}-${row.type}`;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, { ...row });
+      continue;
+    }
+    existing.sessionCount += row.sessionCount || 0;
+    existing.totalTurns += row.totalTurns || 0;
+    existing.totalInputTokens += row.totalInputTokens || 0;
+    existing.totalOutputTokens += row.totalOutputTokens || 0;
+    existing.totalCacheReadTokens += row.totalCacheReadTokens || 0;
+    existing.totalCacheCreationTokens += row.totalCacheCreationTokens || 0;
+    existing.uniqueUsers += row.uniqueUsers || 0;
+  }
+  return [...map.values()].sort(
+    (a, b) => a.year - b.year || a.month - b.month || String(a.type).localeCompare(String(b.type)),
+  );
+};
+
 /** Exact same Current Summary columns as Org Analytics. */
 const SUMMARY_COLUMNS: Array<{ key: string; label: string; group: "meta" | "core" | "derived" }> = [
   { key: "orgName", label: "Organization", group: "meta" },
@@ -282,6 +329,36 @@ const isoWeeksForMonths = (year: number, months: number[]): number[] => {
     }
   }
   return [...weeks].sort((a, b) => a - b);
+};
+
+/**
+ * Calendar lookback ending at year/month (inclusive), grouped by year for API payloads.
+ * Used so dashboard 6-month / 3-month charts have data when only one month is selected.
+ */
+const monthsEndingAtByYear = (
+  year: number,
+  endMonth: number,
+  count: number,
+): Array<{ year: number; months: number[] }> => {
+  const byYear = new Map<number, number[]>();
+  let y = year;
+  let m = endMonth;
+  for (let i = 0; i < count; i++) {
+    const list = byYear.get(y) || [];
+    list.push(m);
+    byYear.set(y, list);
+    m -= 1;
+    if (m < 1) {
+      m = 12;
+      y -= 1;
+    }
+  }
+  return [...byYear.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([yr, mos]) => ({
+      year: yr,
+      months: [...new Set(mos)].sort((a, b) => a - b),
+    }));
 };
 
 const formatOrgNumber = (value?: number | null) =>
@@ -506,6 +583,7 @@ export default function WellbeingAnalyticsPage() {
   const [categoryRows, setCategoryRows] = useState<CategoryMonthRow[]>([]);
   const [featureUsageRows, setFeatureUsageRows] = useState<FeatureUsageRow[]>([]);
   const [orgSummaryRows, setOrgSummaryRows] = useState<OrgSummaryResult[]>([]);
+  const [chatMonthlyRows, setChatMonthlyRows] = useState<ChatMonthlyRow[]>([]);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [tenantBatchProgress, setTenantBatchProgress] = useState<{
     current: number;
@@ -601,6 +679,7 @@ export default function WellbeingAnalyticsPage() {
     setCategoryRows([]);
     setFeatureUsageRows([]);
     setOrgSummaryRows([]);
+    setChatMonthlyRows([]);
     setHasLoaded(false);
     if (platform) fetchOrganisations(platform);
   }, [platform]);
@@ -730,8 +809,22 @@ export default function WellbeingAnalyticsPage() {
     [orgNameByTid],
   );
 
+  /** Wellbeing table shows only the user-selected months; dashboard keeps lookback rows. */
+  const tableRows = useMemo(() => {
+    const selected = new Set(months.map(Number));
+    const yearNum = Number(year) || currentYear;
+    return rows.filter((row) => row.year === yearNum && selected.has(row.month));
+  }, [rows, months, year]);
+
+  /** Feature usage table shows only selected months; dashboard keeps 6-month lookback. */
+  const featureUsageTableRows = useMemo(() => {
+    const selected = new Set(months.map(Number));
+    const yearNum = Number(year) || currentYear;
+    return featureUsageRows.filter((row) => row.year === yearNum && selected.has(row.month));
+  }, [featureUsageRows, months, year]);
+
   const wellbeingTableTotals = useMemo(() => {
-    if (!rows.length) return null;
+    if (!tableRows.length) return null;
     let wellbeingWeighted = 0;
     let wellbeingWeight = 0;
     let brewWeighted = 0;
@@ -749,7 +842,7 @@ export default function WellbeingAnalyticsPage() {
     let totalCount = 0;
     let helpful = 0;
     let notHelpful = 0;
-    for (const row of rows) {
+    for (const row of tableRows) {
       if (row.wellbeingIndex != null) {
         wellbeingWeighted += row.wellbeingIndex;
         wellbeingWeight += 1;
@@ -798,7 +891,7 @@ export default function WellbeingAnalyticsPage() {
       effectiveness:
         feedbackTotal > 0 ? Number(((helpful / feedbackTotal) * 100).toFixed(1)) : null,
     };
-  }, [rows]);
+  }, [tableRows]);
 
   const driverTableTotals = useMemo(() => {
     if (!driverRows.length) return null;
@@ -868,12 +961,12 @@ export default function WellbeingAnalyticsPage() {
   }, [categoryRows]);
 
   const featureUsageTableTotals = useMemo(() => {
-    if (!featureUsageRows.length) return null;
+    if (!featureUsageTableRows.length) return null;
     let usersWithFeature = 0;
     let totalViews = 0;
     let hasViews = false;
     const orgUsersByTid = new Map<string, number>();
-    for (const row of featureUsageRows) {
+    for (const row of featureUsageTableRows) {
       usersWithFeature += row.usersWithFeature || 0;
       if (row.totalViews != null) {
         totalViews += row.totalViews;
@@ -888,7 +981,33 @@ export default function WellbeingAnalyticsPage() {
       totalViews: hasViews ? totalViews : null,
       orgUsers,
     };
-  }, [featureUsageRows]);
+  }, [featureUsageTableRows]);
+
+  /** Pivot chat sessions: month rows × chat-type columns. */
+  const chatMonthlyPivot = useMemo(() => {
+    const typeSet = new Set<string>();
+    const monthMap = new Map<
+      string,
+      { year: number; month: number; label: string; byType: Record<string, ChatMonthlyRow> }
+    >();
+    for (const row of chatMonthlyRows) {
+      const type = String(row.type || "unknown");
+      typeSet.add(type);
+      const key = `${row.year}-${String(row.month).padStart(2, "0")}`;
+      const existing = monthMap.get(key) || {
+        year: row.year,
+        month: row.month,
+        label: formatMonth(row.month, row.year),
+        byType: {},
+      };
+      existing.byType[type] = row;
+      monthMap.set(key, existing);
+    }
+    return {
+      types: [...typeSet].sort((a, b) => a.localeCompare(b)),
+      months: [...monthMap.values()].sort((a, b) => a.year - b.year || a.month - b.month),
+    };
+  }, [chatMonthlyRows]);
 
   const summaryTotalsRow = useMemo(() => {
     if (!orgSummaryRows.length) return null;
@@ -957,6 +1076,7 @@ export default function WellbeingAnalyticsPage() {
     setCategoryRows([]);
     setFeatureUsageRows([]);
     setOrgSummaryRows([]);
+    setChatMonthlyRows([]);
     setHasLoaded(true);
 
     const batches = chunk(selectedOrgs, TENANT_BATCH_SIZE);
@@ -965,8 +1085,19 @@ export default function WellbeingAnalyticsPage() {
     const allCategoryRecords: EmotionalCategoryAnalyticsRecord[] = [];
     const allFeatureUsageRecords: FeatureUsageAnalyticsRecord[] = [];
     const allOrgSummary: OrgSummaryResult[] = [];
+    const allChatMonthly: ChatMonthlyRow[] = [];
     const selectedMonths = months.map(Number).sort((a, b) => a - b);
-    const selectedWeeks = isoWeeksForMonths(Number(year) || currentYear, selectedMonths);
+    const yearNum = Number(year) || currentYear;
+    const selectedWeeks = isoWeeksForMonths(yearNum, selectedMonths);
+    // Dashboard charts need up to 6 months ending at the selected month (incl. prior year).
+    const endMonth = selectedMonths[selectedMonths.length - 1];
+    const startMonth = selectedMonths[0];
+    const wellbeingLookbackByYear = monthsEndingAtByYear(yearNum, endMonth, 6);
+    // Feature usage lookback for rolling 6-month Effectiveness / Personalize on the dashboard.
+    const featureLookbackByYear = wellbeingLookbackByYear;
+    const chatStartDate = `${yearNum}-${String(startMonth).padStart(2, "0")}-01`;
+    const chatEndDay = new Date(Date.UTC(yearNum, endMonth, 0)).getUTCDate();
+    const chatEndDate = `${yearNum}-${String(endMonth).padStart(2, "0")}-${String(chatEndDay).padStart(2, "0")}`;
     let completedTenants = 0;
 
     try {
@@ -979,7 +1110,6 @@ export default function WellbeingAnalyticsPage() {
 
         const batch = batches[i];
         const tIds = batch.map((org) => org.tId);
-        const yearNum = Number(year) || currentYear;
         const payloadBase = {
           platformKey: platform,
           tIds,
@@ -987,18 +1117,34 @@ export default function WellbeingAnalyticsPage() {
           months: selectedMonths,
         };
 
-        const requests: [
-          Promise<WellbeingAnalyticsResponse>,
-          Promise<EmotionalDriverAnalyticsResponse>,
-          Promise<FeatureUsageAnalyticsResponse>,
-          Promise<OrganizationAnalyticsResponse | null>,
-        ] = [
+        const wellbeingRequests = wellbeingLookbackByYear.map((slot) =>
           post<WellbeingAnalyticsResponse>("/admin/wellbeing-analytics", {
-            ...payloadBase,
+            platformKey: platform,
+            tIds,
+            year: slot.year,
+            months: slot.months,
             viewMode: "organization",
           }),
+        );
+
+        const featureUsageRequests = featureLookbackByYear.map((slot) =>
+          post<FeatureUsageAnalyticsResponse>("/admin/feature-usage-analytics", {
+            platformKey: platform,
+            tIds,
+            year: slot.year,
+            months: slot.months,
+          }),
+        );
+
+        const requests: [
+          Promise<WellbeingAnalyticsResponse[]>,
+          Promise<EmotionalDriverAnalyticsResponse>,
+          Promise<FeatureUsageAnalyticsResponse[]>,
+          Promise<OrganizationAnalyticsResponse | null>,
+        ] = [
+          Promise.all(wellbeingRequests),
           post<EmotionalDriverAnalyticsResponse>("/admin/emotional-drivers-analytics", payloadBase),
-          post<FeatureUsageAnalyticsResponse>("/admin/feature-usage-analytics", payloadBase),
+          Promise.all(featureUsageRequests),
           selectedWeeks.length
             ? post<OrganizationAnalyticsResponse>("/admin/organization-analytics", {
                 platformKey: platform,
@@ -1014,13 +1160,37 @@ export default function WellbeingAnalyticsPage() {
             : Promise.resolve(null),
         ];
 
-        const [wellbeingResponse, driversResponse, featureUsageResponse, orgAnalyticsResponse] =
-          await Promise.all(requests);
+        const chatMonthlyPromises = batch.map((org) =>
+          post<ChatMonthlyResponse>("/admin/chat-monthly-consumption", {
+            platform,
+            organizationId: org._id,
+            startDate: chatStartDate,
+            endDate: chatEndDate,
+          }).catch((err) => {
+            console.error(`Chat monthly consumption failed for ${org.name}:`, err);
+            return null;
+          }),
+        );
 
-        allRecords.push(...(wellbeingResponse?.records || []));
+        const [coreResults, chatResults] = await Promise.all([
+          Promise.all(requests),
+          Promise.all(chatMonthlyPromises),
+        ]);
+
+        const [wellbeingResponses, driversResponse, featureUsageResponses, orgAnalyticsResponse] =
+          coreResults;
+
+        for (const wellbeingResponse of wellbeingResponses) {
+          allRecords.push(...(wellbeingResponse?.records || []));
+        }
         allDriverRecords.push(...(driversResponse?.records || []));
         allCategoryRecords.push(...(driversResponse?.categoryRecords || []));
-        allFeatureUsageRecords.push(...(featureUsageResponse?.records || []));
+        for (const featureUsageResponse of featureUsageResponses) {
+          allFeatureUsageRecords.push(...(featureUsageResponse?.records || []));
+        }
+        for (const chatRes of chatResults) {
+          allChatMonthly.push(...(chatRes?.records || []));
+        }
 
         if (orgAnalyticsResponse) {
           const byTid = new Map(
@@ -1051,6 +1221,7 @@ export default function WellbeingAnalyticsPage() {
         setCategoryRows(mapCategoryRecords(allCategoryRecords));
         setFeatureUsageRows(mapFeatureUsageRecords(allFeatureUsageRecords));
         setOrgSummaryRows([...allOrgSummary].sort((a, b) => a.orgName.localeCompare(b.orgName)));
+        setChatMonthlyRows(mergeChatMonthlyRows(allChatMonthly));
       }
 
       if (requestId !== requestRef.current) return;
@@ -1074,6 +1245,7 @@ export default function WellbeingAnalyticsPage() {
         setCategoryRows([]);
         setFeatureUsageRows([]);
         setOrgSummaryRows([]);
+        setChatMonthlyRows([]);
         setHasLoaded(false);
       }
     } finally {
@@ -1192,6 +1364,7 @@ export default function WellbeingAnalyticsPage() {
             categoryRows={categoryRows}
             featureRows={featureUsageRows}
             orgSummaryRows={orgSummaryRows}
+            chatMonthlyRows={chatMonthlyRows}
           />
         )}
 
@@ -1337,7 +1510,7 @@ export default function WellbeingAnalyticsPage() {
                         <HeaderWithInfo label="Star Rating Count" infoKey="starRatingCount" />
                       </th>
                     </tr>
-                    {wellbeingTableTotals && rows.length > 0 && (
+                    {wellbeingTableTotals && tableRows.length > 0 && (
                       <tr className="border-y-2 border-[#1f00a3]/40 bg-[#1f00a3]/12">
                         <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
                           Total
@@ -1391,7 +1564,7 @@ export default function WellbeingAnalyticsPage() {
                     )}
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
-                    {rows.length === 0 ? (
+                    {tableRows.length === 0 ? (
                       <tr>
                         <td colSpan={16} className="px-3 py-8 text-center text-gray-500">
                           No rows for this selection
@@ -1399,7 +1572,7 @@ export default function WellbeingAnalyticsPage() {
                       </tr>
                     ) : (
                       <>
-                        {rows.map((row, index) => (
+                        {tableRows.map((row, index) => (
                           <tr
                             key={row.id}
                             className={index % 2 === 0 ? "bg-white" : "bg-gray-50/80"}
@@ -1809,7 +1982,7 @@ export default function WellbeingAnalyticsPage() {
                         Org users
                       </th>
                     </tr>
-                    {featureUsageTableTotals && featureUsageRows.length > 0 && (
+                    {featureUsageTableTotals && featureUsageTableRows.length > 0 && (
                       <tr className="border-y-2 border-[#1f00a3]/40 bg-[#1f00a3]/12">
                         <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
                           —
@@ -1842,7 +2015,7 @@ export default function WellbeingAnalyticsPage() {
                     )}
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-100">
-                    {featureUsageRows.length === 0 ? (
+                    {featureUsageTableRows.length === 0 ? (
                       <tr>
                         <td colSpan={9} className="px-3 py-8 text-center text-gray-500">
                           No feature usage rows for this selection
@@ -1850,7 +2023,7 @@ export default function WellbeingAnalyticsPage() {
                       </tr>
                     ) : (
                       <>
-                        {featureUsageRows.map((row, index) => (
+                        {featureUsageTableRows.map((row, index) => (
                           <tr
                             key={row.id}
                             className={index % 2 === 0 ? "bg-white" : "bg-gray-50/80"}
@@ -1887,6 +2060,91 @@ export default function WellbeingAnalyticsPage() {
                   </tbody>
                 </table>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {hasLoaded && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Monthly Chat Consumption by Type</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-3 text-xs text-gray-500">
+                Sessions per month from User_Chat_session (type + date) for the selected tenants and
+                months. Hover a cell for token / user detail. Total Tokens = input + output.
+              </p>
+              {chatMonthlyPivot.months.length === 0 ? (
+                <p className="py-8 text-center text-sm text-gray-500">
+                  No chat sessions for this selection
+                </p>
+              ) : (
+                <div className="overflow-x-auto max-h-[28rem]">
+                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead className="sticky top-0 z-10 bg-gray-50">
+                      <tr>
+                        <th className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700">
+                          Month
+                        </th>
+                        {chatMonthlyPivot.types.map((type) => (
+                          <th
+                            key={type}
+                            className="whitespace-nowrap px-3 py-2 text-right text-xs font-semibold text-gray-700"
+                          >
+                            {CHAT_TYPE_LABELS[type] || type}
+                          </th>
+                        ))}
+                        <th className="whitespace-nowrap px-3 py-2 text-right text-xs font-semibold text-gray-700">
+                          Total Sessions
+                        </th>
+                        <th className="whitespace-nowrap px-3 py-2 text-right text-xs font-semibold text-gray-700">
+                          Total Tokens
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 bg-white">
+                      {chatMonthlyPivot.months.map((m) => {
+                        let monthSessions = 0;
+                        let monthTokens = 0;
+                        return (
+                          <tr key={m.label} className="hover:bg-gray-50/80">
+                            <td className="whitespace-nowrap px-3 py-2 font-medium text-gray-900">
+                              {m.label}
+                            </td>
+                            {chatMonthlyPivot.types.map((type) => {
+                              const cell = m.byType[type];
+                              const sessions = cell?.sessionCount || 0;
+                              const tokens =
+                                (cell?.totalInputTokens || 0) + (cell?.totalOutputTokens || 0);
+                              monthSessions += sessions;
+                              monthTokens += tokens;
+                              return (
+                                <td
+                                  key={type}
+                                  className="whitespace-nowrap px-3 py-2 text-right text-gray-800"
+                                  title={
+                                    cell
+                                      ? `Sessions: ${sessions.toLocaleString()}\nInput: ${(cell.totalInputTokens || 0).toLocaleString()}\nOutput: ${(cell.totalOutputTokens || 0).toLocaleString()}\nUsers: ${(cell.uniqueUsers || 0).toLocaleString()}`
+                                      : undefined
+                                  }
+                                >
+                                  {cell ? formatCount(sessions) : "—"}
+                                </td>
+                              );
+                            })}
+                            <td className="whitespace-nowrap px-3 py-2 text-right font-semibold text-gray-900">
+                              {formatCount(monthSessions)}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-right font-semibold text-gray-900">
+                              {formatCount(monthTokens)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
