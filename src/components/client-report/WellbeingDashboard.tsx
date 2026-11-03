@@ -36,6 +36,8 @@ export type DashboardWellbeingRow = {
   helpful: number | null;
   notHelpful: number | null;
   effectiveness: number | null;
+  starRating: number | null;
+  starRatingCount: number | null;
 };
 
 export type DashboardCategoryRow = {
@@ -155,24 +157,46 @@ function clamp(n: number, min: number, max: number) {
 }
 
 /**
- * Solid fill for RISKS from % of users with score ≥7.
- * Zones match markers at 40% / 70%: Acceptable → Cautiously Neutral → Needs Attention.
+ * RISKS color from avg score (0–10). Markers at 4 / 7:
+ * Acceptable → Cautiously Neutral → Needs Attention.
  */
-function riskBarColor(pctAtOrAbove7: number | null): string {
-  if (pctAtOrAbove7 == null) return "#cbd5e1";
-  if (pctAtOrAbove7 < 40) return "#16a34a";
-  if (pctAtOrAbove7 < 70) return "#ca8a04";
+function riskAvgBarColor(score: number | null): string {
+  if (score == null) return "#cbd5e1";
+  if (score < 4) return "#16a34a";
+  if (score < 7) return "#eab308";
   return "#dc2626";
 }
 
 /**
- * Solid fill for DRIVERS from % of users with score ≥7.
- * Zones match markers at 40% / 70%: Needs Attention → Cautiously Neutral → Positive.
+ * RISKS color from % of users with score ≥7.
+ * Zones match markers at 33.3% / 66.6%.
  */
-function driverBarColor(pctAtOrAbove7: number | null): string {
+function riskPctBarColor(pctAtOrAbove7: number | null): string {
   if (pctAtOrAbove7 == null) return "#cbd5e1";
-  if (pctAtOrAbove7 < 40) return "#dc2626";
-  if (pctAtOrAbove7 < 70) return "#ca8a04";
+  if (pctAtOrAbove7 < 33.3) return "#16a34a";
+  if (pctAtOrAbove7 < 66.6) return "#eab308";
+  return "#dc2626";
+}
+
+/**
+ * DRIVERS color from avg score (0–10). Markers at 4 / 7:
+ * Needs Attention → Cautiously Neutral → Positive.
+ */
+function driverAvgBarColor(score: number | null): string {
+  if (score == null) return "#cbd5e1";
+  if (score < 4) return "#dc2626";
+  if (score < 7) return "#eab308";
+  return "#16a34a";
+}
+
+/**
+ * DRIVERS color from % of users with score ≥7.
+ * Zones match markers at 33.3% / 66.6%.
+ */
+function driverPctBarColor(pctAtOrAbove7: number | null): string {
+  if (pctAtOrAbove7 == null) return "#cbd5e1";
+  if (pctAtOrAbove7 < 33.3) return "#dc2626";
+  if (pctAtOrAbove7 < 66.6) return "#eab308";
   return "#16a34a";
 }
 
@@ -381,79 +405,170 @@ function AreaTrend({ points }: { points: Array<{ label: string; value: number | 
 
 type ZoneMeterItem = {
   title: string;
+  /** Average score on 0–10 scale (first bar). */
+  avgScore: number | null;
+  avgColor: string;
+  /** % of users with score ≥7 (second bar). */
   pctAtOrAbove7: number | null;
-  color: string;
+  pctColor: string;
 };
 
-/** Shared 0–100% (≥7 users) scale with vertical threshold lines and zone labels. */
+/** Five-star display for a 0–5 average (supports partial fill). */
+function StarRatingRow({ value }: { value: number | null }) {
+  const score = value == null ? 0 : clamp(value, 0, 5);
+  return (
+    <div
+      className="flex items-center gap-0.5"
+      role="img"
+      aria-label={value == null ? "No star rating" : `${value.toFixed(1)} out of 5 stars`}
+    >
+      {[0, 1, 2, 3, 4].map((i) => {
+        const fill = clamp(score - i, 0, 1);
+        return (
+          <span key={i} className="relative inline-block h-3.5 w-3.5">
+            <svg
+              viewBox="0 0 24 24"
+              className="absolute inset-0 h-full w-full text-slate-200"
+              aria-hidden
+            >
+              <path
+                fill="currentColor"
+                d="M12 2.5l2.9 5.88 6.49.94-4.7 4.58 1.11 6.47L12 17.77l-5.8 3.05 1.11-6.47-4.7-4.58 6.49-.94L12 2.5z"
+              />
+            </svg>
+            <span
+              className="absolute inset-0 overflow-hidden"
+              style={{ width: `${fill * 100}%` }}
+              aria-hidden
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-amber-400">
+                <path
+                  fill="currentColor"
+                  d="M12 2.5l2.9 5.88 6.49.94-4.7 4.58 1.11 6.47L12 17.77l-5.8 3.05 1.11-6.47-4.7-4.58 6.49-.94L12 2.5z"
+                />
+              </svg>
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function ZoneMeterBar({
+  title,
+  barPct,
+  color,
+  valueLabel,
+  markers,
+  minFill = 14,
+}: {
+  title?: string;
+  barPct: number;
+  color: string;
+  valueLabel: string;
+  markers: Array<{ at: number; color: string }>;
+  minFill?: number;
+}) {
+  const onFill = barPct >= 88;
+  return (
+    <div className="relative h-6 overflow-hidden rounded-md bg-slate-100">
+      {markers.map((m) => (
+        <div
+          key={`${m.at}-${m.color}`}
+          className="pointer-events-none absolute bottom-0 top-0 z-10 w-0.5"
+          style={{ left: `${m.at}%`, background: m.color }}
+          aria-hidden
+        />
+      ))}
+      <div
+        className={`absolute inset-y-0 left-0 z-0 flex items-center transition-all ${
+          title ? "min-w-[3.5rem] px-2" : ""
+        }`}
+        style={{
+          width: `${Math.max(barPct, barPct > 0 ? minFill : 0)}%`,
+          background: color,
+        }}
+      >
+        {title ? (
+          <span className="truncate text-[9px] font-bold uppercase tracking-wide text-white drop-shadow-sm">
+            {title}
+          </span>
+        ) : null}
+      </div>
+      <span
+        className={`absolute right-1.5 top-1/2 z-20 -translate-y-1/2 text-[9px] font-bold tabular-nums ${
+          onFill ? "text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.55)]" : "text-slate-900"
+        }`}
+      >
+        {valueLabel}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Each metric plots two adjacent bars: avg score (0–10) | % users with >7.
+ * Threshold markers at 33.3%/66.6% are drawn on the right-hand track.
+ */
 function ZoneMeterGroup({
   items,
   markers,
   zones,
 }: {
   items: ZoneMeterItem[];
-  /** Marker positions as % of users with score ≥7 (e.g. 40 = 40%). */
+  /** Marker positions as % of the right-hand bar track (33.3 / 66.6). */
   markers: Array<{ at: number; color: string }>;
   zones: Array<{ label: string; color: string }>;
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-col justify-center gap-2">
-      <div className="relative space-y-2.5 py-0.5">
-        {/* Vertical threshold lines across all bars */}
-        {markers.map((m) => (
-          <div
-            key={`${m.at}-${m.color}`}
-            className="pointer-events-none absolute bottom-0 top-0 z-10 w-0.5"
-            style={{ left: `${m.at}%`, background: m.color }}
-            aria-hidden
-          />
-        ))}
-
+    <div className="flex h-full min-h-0 flex-col justify-center gap-1.5">
+      <div className="space-y-2 py-0.5">
         {items.map((item) => {
-          const barPct = item.pctAtOrAbove7 == null ? 0 : clamp(item.pctAtOrAbove7, 0, 100);
-          const pctLabel = item.pctAtOrAbove7 == null ? "—" : `${item.pctAtOrAbove7.toFixed(1)}%`;
-          // % sits at the right of the full track; white when fill covers that end.
-          const pctOnFill = barPct >= 88;
+          const avgPct = item.avgScore == null ? 0 : clamp((item.avgScore / 10) * 100, 0, 100);
+          const usersPct = item.pctAtOrAbove7 == null ? 0 : clamp(item.pctAtOrAbove7, 0, 100);
           return (
-            <div key={item.title} className="relative z-0">
-              <div className="relative h-7 overflow-hidden rounded-md bg-slate-100">
-                <div
-                  className="absolute inset-y-0 left-0 flex min-w-[4.5rem] items-center px-2.5 transition-all"
-                  style={{
-                    width: `${Math.max(barPct, item.pctAtOrAbove7 == null ? 0 : 14)}%`,
-                    background: item.color,
-                  }}
-                >
-                  <span className="truncate text-[10px] font-bold uppercase tracking-wide text-white drop-shadow-sm">
-                    {item.title}
-                  </span>
-                </div>
-                <span
-                  className={`absolute right-2 top-1/2 z-20 -translate-y-1/2 text-[11px] font-bold tabular-nums ${
-                    pctOnFill
-                      ? "text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.55)]"
-                      : "text-slate-900"
-                  }`}
-                >
-                  {pctLabel}
-                </span>
-              </div>
+            <div key={item.title} className="grid grid-cols-2 gap-2">
+              <ZoneMeterBar
+                title={item.title}
+                barPct={avgPct}
+                color={item.avgColor}
+                markers={[]}
+                valueLabel={item.avgScore == null ? "—" : `${item.avgScore.toFixed(1)} avg`}
+                minFill={item.avgScore == null ? 0 : 28}
+              />
+              <ZoneMeterBar
+                barPct={usersPct}
+                color={item.pctColor}
+                markers={markers}
+                valueLabel={
+                  item.pctAtOrAbove7 == null
+                    ? "—"
+                    : `${item.pctAtOrAbove7.toFixed(1)}% users with >7`
+                }
+                minFill={item.pctAtOrAbove7 == null ? 0 : 22}
+              />
             </div>
           );
         })}
       </div>
 
-      {/* Zone labels aligned to marker columns — no mid-word breaks */}
-      <div className="grid grid-cols-3 gap-1 pt-0.5">
-        {zones.map((zone) => (
-          <p
-            key={zone.label}
-            className="text-center text-[10px] font-semibold leading-tight"
-            style={{ color: zone.color }}
-          >
-            {zone.label}
-          </p>
-        ))}
+      <div className="grid grid-cols-2 gap-2">
+        <p className="text-center text-[9px] font-medium leading-none text-slate-500">
+          &gt;6 is good. &gt;7 is ideal.
+        </p>
+        {/* Zone scale — right-hand (% users) bars only */}
+        <div className="grid grid-cols-3 gap-1">
+          {zones.map((zone) => (
+            <p
+              key={zone.label}
+              className="text-center text-[10px] font-semibold leading-tight"
+              style={{ color: zone.color }}
+            >
+              {zone.label}
+            </p>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -536,6 +651,7 @@ export function WellbeingDashboard({
 
   const categoryScores = useMemo(() => {
     const pick = (key: string) => {
+      const scores: number[] = [];
       let usersWithData = 0;
       let usersAtOrAbove = 0;
       let hasPct = false;
@@ -543,6 +659,7 @@ export function WellbeingDashboard({
         if (selectedMonth != null && (row.month !== selectedMonth || row.year !== year)) continue;
         const metric = row.categories[key];
         if (!metric) continue;
+        if (metric.avgScore != null) scores.push(metric.avgScore);
         const withData = metric.usersWithData || 0;
         usersWithData += withData;
         if (metric.usersAtOrAboveThreshold != null) {
@@ -554,6 +671,7 @@ export function WellbeingDashboard({
         }
       }
       return {
+        score: avg(scores),
         pctAtOrAbove7:
           hasPct && usersWithData > 0
             ? Number(((usersAtOrAbove / usersWithData) * 100).toFixed(1))
@@ -657,6 +775,25 @@ export function WellbeingDashboard({
     };
   }, [wellbeingRows, inSixMonthWindow]);
 
+  /** Weighted in-app star rating (Feature_Feedback feature=app, 1–5) over rolling 6 months. */
+  const starRatingAvg = useMemo(() => {
+    let weighted = 0;
+    let weight = 0;
+    for (const row of wellbeingRows) {
+      if (!inSixMonthWindow(row.year, row.month)) continue;
+      const count = row.starRatingCount || 0;
+      // Guard: only 1–5 star scale (ignore any legacy non-app values).
+      if (row.starRating == null || count <= 0 || row.starRating < 1 || row.starRating > 5)
+        continue;
+      weighted += row.starRating * count;
+      weight += count;
+    }
+    return {
+      avg: weight > 0 ? Number((weighted / weight).toFixed(1)) : null,
+      count: weight,
+    };
+  }, [wellbeingRows, inSixMonthWindow]);
+
   /** Personalize adoption over rolling 6 months vs MAU active users. */
   const personalize = useMemo(() => {
     let users = 0;
@@ -736,10 +873,10 @@ export function WellbeingDashboard({
         mainRow.style.minHeight = "0";
         // Stretch columns so Effectiveness / Personalize bottoms can align.
         mainRow.style.alignItems = "stretch";
-        // PDF widths: Wellbeing/MAU 35% | Risks/Drivers/Effectiveness 35% | Features+Personalize 30%
+        // PDF widths: Wellbeing/MAU 30% | Risks/Drivers/Effectiveness 40% | Features+Personalize 30%
         // Use fr so gap doesn't push past 100% width.
         mainRow.style.display = "grid";
-        mainRow.style.gridTemplateColumns = "minmax(0, 35fr) minmax(0, 35fr) minmax(0, 30fr)";
+        mainRow.style.gridTemplateColumns = "minmax(0, 30fr) minmax(0, 40fr) minmax(0, 30fr)";
         mainRow.style.gap = "12px";
       }
       if (mauPanel) {
@@ -912,10 +1049,10 @@ export function WellbeingDashboard({
           </div>
           <div
             className="grid gap-3"
-            style={{ gridTemplateColumns: "minmax(0, 35fr) minmax(0, 35fr) minmax(0, 30fr)" }}
+            style={{ gridTemplateColumns: "minmax(0, 30fr) minmax(0, 40fr) minmax(0, 30fr)" }}
             data-export-main-row
           >
-            {/* Left: Wellbeing Index + MAU (35%) */}
+            {/* Left: Wellbeing Index + MAU (30%) */}
             <div className="flex min-w-0 flex-col gap-3" data-export-left-col>
               <Panel label="WELLBEING INDEX" className="!overflow-visible">
                 <div className="relative mb-1 pr-5">
@@ -925,7 +1062,7 @@ export function WellbeingDashboard({
                   </div>
                   <AreaTrend points={sixMonthTrendPoints} />
                   <p className="absolute right-0 top-1/2 -translate-y-1/2 rotate-180 text-[11px] font-bold uppercase tracking-wide text-emerald-800 [writing-mode:vertical-rl]">
-                    &gt;6 is good
+                    &gt;6 is good. &gt;7 is ideal.
                   </p>
                 </div>
               </Panel>
@@ -974,22 +1111,26 @@ export function WellbeingDashboard({
                   items={[
                     {
                       title: "Burnout Risk",
+                      avgScore: categoryScores.burnoutRisk.score,
+                      avgColor: riskAvgBarColor(categoryScores.burnoutRisk.score),
                       pctAtOrAbove7: categoryScores.burnoutRisk.pctAtOrAbove7,
-                      color: riskBarColor(categoryScores.burnoutRisk.pctAtOrAbove7),
+                      pctColor: riskPctBarColor(categoryScores.burnoutRisk.pctAtOrAbove7),
                     },
                     {
                       title: "Stress",
+                      avgScore: categoryScores.stress.score,
+                      avgColor: riskAvgBarColor(categoryScores.stress.score),
                       pctAtOrAbove7: categoryScores.stress.pctAtOrAbove7,
-                      color: riskBarColor(categoryScores.stress.pctAtOrAbove7),
+                      pctColor: riskPctBarColor(categoryScores.stress.pctAtOrAbove7),
                     },
                   ]}
                   markers={[
-                    { at: 40, color: "#16a34a" },
-                    { at: 70, color: "#dc2626" },
+                    { at: 33.3, color: "#16a34a" },
+                    { at: 66.6, color: "#dc2626" },
                   ]}
                   zones={[
                     { label: "Acceptable", color: "#16a34a" },
-                    { label: "Cautiously Neutral", color: "#ca8a04" },
+                    { label: "Cautiously Neutral", color: "#eab308" },
                     { label: "Needs Attention", color: "#dc2626" },
                   ]}
                 />
@@ -1000,81 +1141,102 @@ export function WellbeingDashboard({
                   items={[
                     {
                       title: "Belonging",
+                      avgScore: categoryScores.belonging.score,
+                      avgColor: driverAvgBarColor(categoryScores.belonging.score),
                       pctAtOrAbove7: categoryScores.belonging.pctAtOrAbove7,
-                      color: driverBarColor(categoryScores.belonging.pctAtOrAbove7),
+                      pctColor: driverPctBarColor(categoryScores.belonging.pctAtOrAbove7),
                     },
                     {
                       title: "Energy",
+                      avgScore: categoryScores.energy.score,
+                      avgColor: driverAvgBarColor(categoryScores.energy.score),
                       pctAtOrAbove7: categoryScores.energy.pctAtOrAbove7,
-                      color: driverBarColor(categoryScores.energy.pctAtOrAbove7),
+                      pctColor: driverPctBarColor(categoryScores.energy.pctAtOrAbove7),
                     },
                   ]}
                   markers={[
-                    { at: 40, color: "#dc2626" },
-                    { at: 70, color: "#16a34a" },
+                    { at: 33.3, color: "#dc2626" },
+                    { at: 66.6, color: "#16a34a" },
                   ]}
                   zones={[
                     { label: "Needs Attention", color: "#dc2626" },
-                    { label: "Cautiously Neutral", color: "#ca8a04" },
+                    { label: "Cautiously Neutral", color: "#eab308" },
                     { label: "Positive", color: "#16a34a" },
                   ]}
                 />
               </Panel>
 
-              <Panel
-                label="Effectiveness"
-                className="min-h-[6.75rem] shrink-0"
-                exportAttr="effectiveness"
-              >
-                <div className="flex h-full flex-col justify-center space-y-2">
-                  <div className="flex items-center justify-between gap-2 text-[11px]">
-                    <span className="font-medium text-slate-700">
-                      Helpful vs Not Helpful · 6 mo
-                    </span>
-                    <span className="shrink-0 font-semibold text-slate-800">
-                      {effectiveness.pct == null ? "—" : `${effectiveness.pct}%`}
-                    </span>
-                  </div>
-                  <div className="flex h-3 overflow-hidden rounded-sm bg-slate-100">
-                    {effectiveness.pct != null ? (
-                      <>
-                        <div
-                          className="h-full transition-all"
-                          style={{
-                            width: `${effectiveness.pct}%`,
-                            background: "#059669",
-                          }}
-                          title={`Helpful: ${effectiveness.helpful.toLocaleString()}`}
-                        />
-                        <div
-                          className="h-full transition-all"
-                          style={{
-                            width: `${100 - effectiveness.pct}%`,
-                            background: "#be123c",
-                          }}
-                          title={`Not Helpful: ${effectiveness.notHelpful.toLocaleString()}`}
-                        />
-                      </>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
-                    <span className="inline-flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-sm" style={{ background: "#059669" }} />
-                      Helpful{" "}
-                      <span className="font-semibold text-slate-700">
-                        {effectiveness.helpful.toLocaleString()}
+              <div className="grid shrink-0 grid-cols-2 gap-3">
+                <Panel label="Effectiveness" className="min-h-[6.75rem]" exportAttr="effectiveness">
+                  <div className="flex h-full flex-col justify-center space-y-2">
+                    <div className="flex items-center justify-between gap-2 text-[11px]">
+                      <span className="font-medium text-slate-700">
+                        Helpful vs Not Helpful · 6 mo
                       </span>
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-sm" style={{ background: "#be123c" }} />
-                      Not Helpful{" "}
-                      <span className="font-semibold text-slate-700">
-                        {effectiveness.notHelpful.toLocaleString()}
+                      <span className="shrink-0 font-semibold text-slate-800">
+                        {effectiveness.pct == null ? "—" : `${effectiveness.pct}%`}
                       </span>
-                    </span>
+                    </div>
+                    <div className="flex h-3 overflow-hidden rounded-sm bg-slate-100">
+                      {effectiveness.pct != null ? (
+                        <>
+                          <div
+                            className="h-full transition-all"
+                            style={{
+                              width: `${effectiveness.pct}%`,
+                              background: "#059669",
+                            }}
+                            title={`Helpful: ${effectiveness.helpful.toLocaleString()}`}
+                          />
+                          <div
+                            className="h-full transition-all"
+                            style={{
+                              width: `${100 - effectiveness.pct}%`,
+                              background: "#be123c",
+                            }}
+                            title={`Not Helpful: ${effectiveness.notHelpful.toLocaleString()}`}
+                          />
+                        </>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-sm" style={{ background: "#059669" }} />
+                        Helpful{" "}
+                        <span className="font-semibold text-slate-700">
+                          {effectiveness.helpful.toLocaleString()}
+                        </span>
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-sm" style={{ background: "#be123c" }} />
+                        Not Helpful{" "}
+                        <span className="font-semibold text-slate-700">
+                          {effectiveness.notHelpful.toLocaleString()}
+                        </span>
+                      </span>
+                    </div>
                   </div>
-                </div>
-              </Panel>
+                </Panel>
+
+                <Panel label="Star Rating" className="min-h-[6.75rem]" exportAttr="star-rating">
+                  <div className="flex h-full flex-col justify-center space-y-2">
+                    <div className="flex items-center justify-between gap-2 text-[11px]">
+                      <span className="font-medium text-slate-700">Average · 6 mo</span>
+                      <span className="shrink-0 font-semibold tabular-nums text-slate-800">
+                        {starRatingAvg.avg == null ? "—" : starRatingAvg.avg.toFixed(1)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-center py-0.5">
+                      <StarRatingRow value={starRatingAvg.avg} />
+                    </div>
+                    <p className="text-center text-[10px] text-slate-500">
+                      {starRatingAvg.count > 0
+                        ? `${starRatingAvg.count.toLocaleString()} ratings`
+                        : "No ratings"}
+                    </p>
+                  </div>
+                </Panel>
+              </div>
             </div>
 
             {/* Right: Top Features fills; Personalize same height band as Effectiveness */}

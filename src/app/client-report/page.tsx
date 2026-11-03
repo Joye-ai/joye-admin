@@ -492,8 +492,8 @@ const COLUMN_INFO: Record<string, string> = {
   effectiveness:
     "Effectiveness % = (count of Helpful) ÷ (Helpful + Not Helpful) × 100. From Feature_Feedback thumbs (likes / dislikes). Shown as — when there are no helpful/not-helpful responses that month.",
   starRating:
-    "Average Brew star rating for the month (rating, else currentAverage, else average). Only Brew docs with a rating > 0 are included.",
-  starRatingCount: "Count of Brew documents with a star rating in the month.",
+    'Average in-app star rating for the month (1–5). From Feature_Feedback where feature = "app" (ChatStarRating / app rating UI). Not Brew session averages.',
+  starRatingCount: "Count of in-app Feature_Feedback app star ratings (1–5) in the month.",
   orgName: "Organization name for the selected tenant.",
   tId: "Tenant identifier (tId) used to scope analytics for this organization.",
   status: "Org Analytics summary status (complete / generating / failed).",
