@@ -167,45 +167,45 @@ function clamp(n: number, min: number, max: number) {
 
 /**
  * RISKS avg score (lower is better) — opposite of Drivers:
- * ≤5.9 green, ≥6 & <7 orange, ≥7 red.
+ * ≤3.9 green, ≥4 & <7 orange, ≥7 red.
  */
 function riskAvgBarColor(score: number | null): string {
   if (score == null) return "#cbd5e1";
-  if (score <= 5.9) return "#16a34a";
+  if (score <= 3.9) return "#16a34a";
   if (score < 7) return "#eab308";
   return "#dc2626";
 }
 
 /**
  * RISKS color from % of users with score ≥7.
- * Zones match markers at 33.3% / 66.6%.
+ * <33.3 Caution (orange) · 33.3–66.6 Urgent (light red) · >66.6 Crisis (red).
  */
 function riskPctBarColor(pctAtOrAbove7: number | null): string {
   if (pctAtOrAbove7 == null) return "#cbd5e1";
-  if (pctAtOrAbove7 < 33.3) return "#16a34a";
-  if (pctAtOrAbove7 < 66.6) return "#eab308";
+  if (pctAtOrAbove7 < 33.3) return "#eab308";
+  if (pctAtOrAbove7 < 66.6) return "#f87171";
   return "#dc2626";
 }
 
 /**
  * DRIVERS avg score (higher is better):
- * ≤5.9 red, ≥6 & <7 orange, ≥7 green.
+ * ≤3.9 red, ≥4 & <7 orange, ≥7 green.
  */
 function driverAvgBarColor(score: number | null): string {
   if (score == null) return "#cbd5e1";
-  if (score <= 5.9) return "#dc2626";
+  if (score <= 3.9) return "#dc2626";
   if (score < 7) return "#eab308";
   return "#16a34a";
 }
 
 /**
  * DRIVERS color from % of users with score ≥7.
- * Zones match markers at 33.3% / 66.6%.
+ * <33.3 Concern (orange) · 33.3–66.6 Positive (light green) · >66.6 Excellent (dark green).
  */
 function driverPctBarColor(pctAtOrAbove7: number | null): string {
   if (pctAtOrAbove7 == null) return "#cbd5e1";
-  if (pctAtOrAbove7 < 33.3) return "#dc2626";
-  if (pctAtOrAbove7 < 66.6) return "#eab308";
+  if (pctAtOrAbove7 < 33.3) return "#eab308";
+  if (pctAtOrAbove7 < 66.6) return "#22c55e";
   return "#16a34a";
 }
 
@@ -261,13 +261,13 @@ function gaugeArc(cx: number, cy: number, radius: number, from: number, to: numb
   return `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${large} 1 ${end.x} ${end.y}`;
 }
 
-/** Full-scale zones: red → amber → green so pointer land on the right color. */
+/** Full-scale zones: red → amber → light green (6–7) → full green (>7). */
 const GAUGE_ZONES: Array<{ from: number; to: number; color: string }> = [
   { from: 0, to: 2, color: "#dc2626" },
   { from: 2, to: 4, color: "#ea580c" },
   { from: 4, to: 6, color: "#eab308" },
-  { from: 6, to: 8, color: "#84cc16" },
-  { from: 8, to: 10, color: "#16a34a" },
+  { from: 6, to: 7, color: "#84cc16" },
+  { from: 7, to: 10, color: "#16a34a" },
 ];
 
 function SemiGauge({ value, caption }: { value: number | null; caption: string }) {
@@ -562,18 +562,21 @@ function ZoneMeterBar({
 
 /**
  * Each metric plots two adjacent bars: avg score (0–10) | % users with >7.
- * Threshold markers at 33.3%/66.6% are drawn on the right-hand track.
+ * Left markers at score 4/7 (40%/70%); right markers at 33.3%/66.6%.
  */
 function ZoneMeterGroup({
   items,
   markers,
   zones,
-  avgCaption = ">6 is good. >7 is ideal.",
+  avgMarkers = [],
+  avgCaption = "<4 Needs Attention. 4–7 Cautiously Neutral. >7 is ideal.",
 }: {
   items: ZoneMeterItem[];
   /** Marker positions as % of the right-hand bar track (33.3 / 66.6). */
   markers: Array<{ at: number; color: string }>;
   zones: Array<{ label: string; color: string }>;
+  /** Marker positions on the average (left) bars — score 4 → 40%, score 7 → 70%. */
+  avgMarkers?: Array<{ at: number; color: string }>;
   /** Guidance under the average (left) bars. */
   avgCaption?: string;
 }) {
@@ -590,7 +593,7 @@ function ZoneMeterGroup({
                   title={item.title}
                   barPct={avgPct}
                   color={item.avgColor}
-                  markers={[]}
+                  markers={avgMarkers}
                   valueLabel={item.avgScore == null ? "—" : item.avgScore.toFixed(1)}
                   minFill={item.avgScore == null ? 0 : 28}
                 />
@@ -605,7 +608,7 @@ function ZoneMeterGroup({
                 />
               </div>
               {item.description ? (
-                <p className="text-[8px] font-medium leading-tight text-slate-500">
+                <p className="pt-1.5 text-[8px] font-medium leading-tight text-slate-500">
                   {item.description}
                 </p>
               ) : null}
@@ -631,7 +634,7 @@ function ZoneMeterGroup({
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <p className="text-center text-[9px] font-medium leading-none text-slate-500">
+          <p className="text-center text-[9px] font-medium leading-tight text-slate-500">
             {avgCaption}
           </p>
           <p className="text-center text-[9px] font-medium leading-none text-slate-500">
@@ -1154,27 +1157,25 @@ export function WellbeingDashboard({
                 </div>
               </Panel>
 
-              <Panel label="MAU" className="flex-1 !overflow-visible" exportAttr="mau">
+              <Panel
+                label="Monthly Active Users (MAU)"
+                className="flex-1 !overflow-visible"
+                exportAttr="mau"
+              >
                 <div className="mb-2 space-y-1 text-[11px] text-slate-700">
-                  <div className="grid grid-cols-6 gap-x-1">
-                    {[
-                      "Month",
-                      "Active Users",
-                      "Active %",
-                      "Repeat Users",
-                      "Repeat %",
-                      "Enabled",
-                    ].map((label) => (
-                      <p
-                        key={label}
-                        className="text-center text-[9px] font-normal uppercase leading-tight text-slate-600"
-                      >
-                        {label}
-                      </p>
-                    ))}
+                  <div className="grid grid-cols-5 gap-x-1">
+                    {["Active Users", "Active %", "Repeat Users", "Repeat %", "Enabled"].map(
+                      (label) => (
+                        <p
+                          key={label}
+                          className="text-center text-[9px] font-normal uppercase leading-tight text-slate-600"
+                        >
+                          {label}
+                        </p>
+                      ),
+                    )}
                   </div>
-                  <div className="grid grid-cols-6 gap-x-1">
-                    <p className="text-center font-bold tabular-nums">{latestLabel}</p>
+                  <div className="grid grid-cols-5 gap-x-1">
                     <p className="text-center font-bold tabular-nums">
                       {mau.active.toLocaleString()}
                     </p>
@@ -1200,7 +1201,11 @@ export function WellbeingDashboard({
             <div className="flex min-h-0 min-w-0 flex-col gap-3" data-export-mid-col>
               <Panel label="RISKS" className="flex-1">
                 <ZoneMeterGroup
-                  avgCaption="<6 is ideal. <7 is good."
+                  avgCaption="<4 is Ideal. 4–7 Cautiously Neutral. >7 is Needs Attention"
+                  avgMarkers={[
+                    { at: 40, color: "#16a34a" },
+                    { at: 70, color: "#dc2626" },
+                  ]}
                   items={[
                     {
                       title: "Burnout Risk",
@@ -1220,19 +1225,24 @@ export function WellbeingDashboard({
                     },
                   ]}
                   markers={[
-                    { at: 33.3, color: "#16a34a" },
+                    { at: 33.3, color: "#eab308" },
                     { at: 66.6, color: "#dc2626" },
                   ]}
                   zones={[
-                    { label: "Acceptable", color: "#16a34a" },
-                    { label: "Cautiously Neutral", color: "#eab308" },
-                    { label: "Needs Attention", color: "#dc2626" },
+                    { label: "Caution", color: "#eab308" },
+                    { label: "Urgent", color: "#f87171" },
+                    { label: "Crisis", color: "#dc2626" },
                   ]}
                 />
               </Panel>
 
               <Panel label="DRIVERS" className="flex-1">
                 <ZoneMeterGroup
+                  avgCaption="<4 Needs Attention. 4–7 Cautiously Neutral. >7 is ideal"
+                  avgMarkers={[
+                    { at: 40, color: "#dc2626" },
+                    { at: 70, color: "#16a34a" },
+                  ]}
                   items={[
                     {
                       title: "Belonging",
@@ -1253,13 +1263,13 @@ export function WellbeingDashboard({
                     },
                   ]}
                   markers={[
-                    { at: 33.3, color: "#dc2626" },
+                    { at: 33.3, color: "#eab308" },
                     { at: 66.6, color: "#16a34a" },
                   ]}
                   zones={[
-                    { label: "Needs Attention", color: "#dc2626" },
-                    { label: "Cautiously Neutral", color: "#eab308" },
-                    { label: "Positive", color: "#16a34a" },
+                    { label: "Concern", color: "#eab308" },
+                    { label: "Positive", color: "#22c55e" },
+                    { label: "Excellent", color: "#16a34a" },
                   ]}
                 />
               </Panel>
@@ -1339,7 +1349,9 @@ export function WellbeingDashboard({
                 ) : (
                   <div className="flex h-full flex-col justify-between gap-2">
                     {topFeatures.map((f) => {
-                      const pct = Math.max(18, (f.users / maxFeatureUsers) * 100);
+                      // True proportional width vs top feature (no min clamp — that made post-#1 bars look identical).
+                      const pct =
+                        maxFeatureUsers > 0 ? clamp((f.users / maxFeatureUsers) * 100, 0, 100) : 0;
                       return (
                         <div
                           key={f.page}
@@ -1347,22 +1359,21 @@ export function WellbeingDashboard({
                           style={{ background: "#e2e8f0" }}
                         >
                           <div
-                            className="absolute inset-y-0 left-0 flex min-w-[5.5rem] items-center px-2.5 transition-all"
+                            className="absolute inset-y-0 left-0 transition-all"
                             style={{
                               width: `${pct}%`,
                               background: FEATURE_BAR_COLOR,
                             }}
-                          >
-                            <span
-                              className="truncate text-[11px] font-semibold"
-                              style={{ color: FEATURE_BAR_TEXT }}
-                              title={f.label}
-                            >
-                              {f.label}
-                            </span>
-                          </div>
+                          />
                           <span
-                            className="absolute right-2 top-1/2 z-20 -translate-y-1/2 text-[11px] font-bold tabular-nums"
+                            className="absolute left-2.5 top-1/2 z-10 max-w-[55%] -translate-y-1/2 truncate text-[11px] font-semibold"
+                            style={{ color: FEATURE_BAR_TEXT }}
+                            title={f.label}
+                          >
+                            {f.label}
+                          </span>
+                          <span
+                            className="absolute right-2 top-1/2 z-10 -translate-y-1/2 text-[11px] font-bold tabular-nums"
                             style={{ color: FEATURE_BAR_TEXT }}
                           >
                             {f.users.toLocaleString()}
