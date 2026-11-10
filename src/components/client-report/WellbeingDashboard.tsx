@@ -3,6 +3,7 @@
 import { toPng } from "html-to-image";
 import { jsPDF } from "jspdf";
 import {
+  Fragment,
   useCallback,
   useId,
   useMemo,
@@ -36,6 +37,8 @@ export type DashboardWellbeingRow = {
   helpful: number | null;
   notHelpful: number | null;
   effectiveness: number | null;
+  starRating: number | null;
+  starRatingCount: number | null;
 };
 
 export type DashboardCategoryRow = {
@@ -66,6 +69,7 @@ export type DashboardSummaryRow = {
     registeredUsers: number | null;
     activeUsers: number | null;
     repeatUsers: number | null;
+    [key: string]: number | string | null | undefined;
   } | null;
 };
 
@@ -74,6 +78,12 @@ export type DashboardChatMonthlyRow = {
   month: number;
   type: string;
   sessionCount: number;
+};
+
+export type DashboardMauMonthRow = {
+  year: number;
+  month: number;
+  activeUsers: number;
 };
 
 type Props = {
@@ -85,6 +95,7 @@ type Props = {
   featureRows: DashboardFeatureRow[];
   orgSummaryRows: DashboardSummaryRow[];
   chatMonthlyRows?: DashboardChatMonthlyRow[];
+  mauMonthlyRows?: DashboardMauMonthRow[];
 };
 
 function formatMonthsTenure(year: number, months: number[]): string {
@@ -155,24 +166,46 @@ function clamp(n: number, min: number, max: number) {
 }
 
 /**
- * Solid fill for RISKS from % of users with score ≥7.
- * Zones match markers at 40% / 70%: Acceptable → Cautiously Neutral → Needs Attention.
+ * RISKS avg score (lower is better) — opposite of Drivers:
+ * ≤5.9 green, ≥6 & <7 orange, ≥7 red.
  */
-function riskBarColor(pctAtOrAbove7: number | null): string {
-  if (pctAtOrAbove7 == null) return "#cbd5e1";
-  if (pctAtOrAbove7 < 40) return "#16a34a";
-  if (pctAtOrAbove7 < 70) return "#ca8a04";
+function riskAvgBarColor(score: number | null): string {
+  if (score == null) return "#cbd5e1";
+  if (score <= 5.9) return "#16a34a";
+  if (score < 7) return "#eab308";
   return "#dc2626";
 }
 
 /**
- * Solid fill for DRIVERS from % of users with score ≥7.
- * Zones match markers at 40% / 70%: Needs Attention → Cautiously Neutral → Positive.
+ * RISKS color from % of users with score ≥7.
+ * Zones match markers at 33.3% / 66.6%.
  */
-function driverBarColor(pctAtOrAbove7: number | null): string {
+function riskPctBarColor(pctAtOrAbove7: number | null): string {
   if (pctAtOrAbove7 == null) return "#cbd5e1";
-  if (pctAtOrAbove7 < 40) return "#dc2626";
-  if (pctAtOrAbove7 < 70) return "#ca8a04";
+  if (pctAtOrAbove7 < 33.3) return "#16a34a";
+  if (pctAtOrAbove7 < 66.6) return "#eab308";
+  return "#dc2626";
+}
+
+/**
+ * DRIVERS avg score (higher is better):
+ * ≤5.9 red, ≥6 & <7 orange, ≥7 green.
+ */
+function driverAvgBarColor(score: number | null): string {
+  if (score == null) return "#cbd5e1";
+  if (score <= 5.9) return "#dc2626";
+  if (score < 7) return "#eab308";
+  return "#16a34a";
+}
+
+/**
+ * DRIVERS color from % of users with score ≥7.
+ * Zones match markers at 33.3% / 66.6%.
+ */
+function driverPctBarColor(pctAtOrAbove7: number | null): string {
+  if (pctAtOrAbove7 == null) return "#cbd5e1";
+  if (pctAtOrAbove7 < 33.3) return "#dc2626";
+  if (pctAtOrAbove7 < 66.6) return "#eab308";
   return "#16a34a";
 }
 
@@ -303,7 +336,21 @@ function SemiGauge({ value, caption }: { value: number | null; caption: string }
   );
 }
 
-function AreaTrend({ points }: { points: Array<{ label: string; value: number | null }> }) {
+function formatTrendValue(value: number): string {
+  if (Math.abs(value) >= 1000) {
+    return Math.round(value).toLocaleString();
+  }
+  return Number(value).toFixed(1);
+}
+
+function AreaTrend({
+  points,
+  valueDomain = "auto",
+}: {
+  points: Array<{ label: string; value: number | null }>;
+  /** "wellbeing" keeps the 0–10-ish padding used by wellbeing charts. */
+  valueDomain?: "auto" | "wellbeing";
+}) {
   const uid = useId().replace(/:/g, "");
   const fillId = `area-fill-${uid}`;
   const w = 320;
@@ -311,8 +358,21 @@ function AreaTrend({ points }: { points: Array<{ label: string; value: number | 
   const padX = 14;
   const padY = 16;
   const vals = points.map((p) => p.value).filter((v): v is number => v != null);
-  const min = vals.length ? Math.min(...vals, 4) - 0.4 : 4;
-  const max = vals.length ? Math.max(...vals, 7) + 0.4 : 8;
+  let min: number;
+  let max: number;
+  if (!vals.length) {
+    min = valueDomain === "wellbeing" ? 4 : 0;
+    max = valueDomain === "wellbeing" ? 8 : 1;
+  } else if (valueDomain === "wellbeing") {
+    min = Math.min(...vals, 4) - 0.4;
+    max = Math.max(...vals, 7) + 0.4;
+  } else {
+    const lo = Math.min(...vals);
+    const hi = Math.max(...vals);
+    const pad = Math.max((hi - lo) * 0.08, hi * 0.02, 1);
+    min = Math.max(0, lo - pad);
+    max = hi + pad;
+  }
   const usableW = w - padX * 2;
   const usableH = h - padY * 2;
 
@@ -360,7 +420,7 @@ function AreaTrend({ points }: { points: Array<{ label: string; value: number | 
                 fill="#334155"
                 style={{ fontSize: 11, fontWeight: 700 }}
               >
-                {Number(c.value).toFixed(1)}
+                {formatTrendValue(Number(c.value))}
               </text>
             </>
           )}
@@ -381,79 +441,203 @@ function AreaTrend({ points }: { points: Array<{ label: string; value: number | 
 
 type ZoneMeterItem = {
   title: string;
+  /** Average score on 0–10 scale (first bar). */
+  avgScore: number | null;
+  avgColor: string;
+  /** % of users with score ≥7 (second bar). */
   pctAtOrAbove7: number | null;
-  color: string;
+  pctColor: string;
+  /** Short metric definition shown under the bars. */
+  description?: string;
 };
 
-/** Shared 0–100% (≥7 users) scale with vertical threshold lines and zone labels. */
+/** Five-star display for a 0–5 average (supports partial fill). */
+function StarRatingRow({ value }: { value: number | null }) {
+  const score = value == null ? 0 : clamp(value, 0, 5);
+  return (
+    <div
+      className="flex items-center gap-0.5"
+      role="img"
+      aria-label={value == null ? "No star rating" : `${value.toFixed(1)} out of 5 stars`}
+    >
+      {[0, 1, 2, 3, 4].map((i) => {
+        const fill = clamp(score - i, 0, 1);
+        return (
+          <span key={i} className="relative inline-block h-3.5 w-3.5">
+            <svg
+              viewBox="0 0 24 24"
+              className="absolute inset-0 h-full w-full text-slate-200"
+              aria-hidden
+            >
+              <path
+                fill="currentColor"
+                d="M12 2.5l2.9 5.88 6.49.94-4.7 4.58 1.11 6.47L12 17.77l-5.8 3.05 1.11-6.47-4.7-4.58 6.49-.94L12 2.5z"
+              />
+            </svg>
+            <span
+              className="absolute inset-0 overflow-hidden"
+              style={{ width: `${fill * 100}%` }}
+              aria-hidden
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-amber-400">
+                <path
+                  fill="currentColor"
+                  d="M12 2.5l2.9 5.88 6.49.94-4.7 4.58 1.11 6.47L12 17.77l-5.8 3.05 1.11-6.47-4.7-4.58 6.49-.94L12 2.5z"
+                />
+              </svg>
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function ZoneMeterBar({
+  title,
+  barPct,
+  color,
+  valueLabel,
+  markers,
+  minFill = 14,
+}: {
+  title?: string;
+  barPct: number;
+  color: string;
+  valueLabel: string;
+  markers: Array<{ at: number; color: string }>;
+  minFill?: number;
+}) {
+  const onFill = barPct >= 88;
+  const fillWidth = Math.max(barPct, barPct > 0 ? minFill : 0);
+  return (
+    <div className="relative isolate h-6">
+      {/* Track + fill clipped to the rounded bar */}
+      <div className="absolute inset-0 z-0 overflow-hidden rounded-md">
+        <div className="absolute inset-0" style={{ background: "#e2e8f0" }} />
+        <div
+          className={`absolute inset-y-0 left-0 z-10 flex items-center transition-all ${
+            title ? "min-w-[3.5rem] px-2" : ""
+          }`}
+          style={{
+            width: `${fillWidth}%`,
+            background: color,
+          }}
+        >
+          {title ? (
+            <span className="truncate text-[9px] font-bold uppercase tracking-wide text-white drop-shadow-sm">
+              {title}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      {/* Scale ticks only outside the bar (above + below) — always show both thresholds */}
+      <div
+        className="pointer-events-none absolute inset-x-0 -top-1.5 -bottom-1.5 z-[5]"
+        aria-hidden
+      >
+        {markers.map((m) => (
+          <Fragment key={`${m.at}-${m.color}`}>
+            <div
+              className="absolute top-0 h-1.5 w-0.5 opacity-55"
+              style={{ left: `${m.at}%`, background: m.color }}
+            />
+            <div
+              className="absolute bottom-0 h-1.5 w-0.5 opacity-55"
+              style={{ left: `${m.at}%`, background: m.color }}
+            />
+          </Fragment>
+        ))}
+      </div>
+      <span
+        className={`absolute right-1.5 top-1/2 z-20 -translate-y-1/2 text-[9px] font-bold tabular-nums ${
+          onFill ? "text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.55)]" : "text-slate-900"
+        }`}
+      >
+        {valueLabel}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Each metric plots two adjacent bars: avg score (0–10) | % users with >7.
+ * Threshold markers at 33.3%/66.6% are drawn on the right-hand track.
+ */
 function ZoneMeterGroup({
   items,
   markers,
   zones,
+  avgCaption = ">6 is good. >7 is ideal.",
 }: {
   items: ZoneMeterItem[];
-  /** Marker positions as % of users with score ≥7 (e.g. 40 = 40%). */
+  /** Marker positions as % of the right-hand bar track (33.3 / 66.6). */
   markers: Array<{ at: number; color: string }>;
   zones: Array<{ label: string; color: string }>;
+  /** Guidance under the average (left) bars. */
+  avgCaption?: string;
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-col justify-center gap-2">
-      <div className="relative space-y-2.5 py-0.5">
-        {/* Vertical threshold lines across all bars */}
-        {markers.map((m) => (
-          <div
-            key={`${m.at}-${m.color}`}
-            className="pointer-events-none absolute bottom-0 top-0 z-10 w-0.5"
-            style={{ left: `${m.at}%`, background: m.color }}
-            aria-hidden
-          />
-        ))}
-
+    <div className="flex h-full min-h-0 flex-col justify-center gap-1.5">
+      <div className="space-y-2 py-0.5">
         {items.map((item) => {
-          const barPct = item.pctAtOrAbove7 == null ? 0 : clamp(item.pctAtOrAbove7, 0, 100);
-          const pctLabel = item.pctAtOrAbove7 == null ? "—" : `${item.pctAtOrAbove7.toFixed(1)}%`;
-          // % sits at the right of the full track; white when fill covers that end.
-          const pctOnFill = barPct >= 88;
+          const avgPct = item.avgScore == null ? 0 : clamp((item.avgScore / 10) * 100, 0, 100);
+          const usersPct = item.pctAtOrAbove7 == null ? 0 : clamp(item.pctAtOrAbove7, 0, 100);
           return (
-            <div key={item.title} className="relative z-0">
-              <div className="relative h-7 overflow-hidden rounded-md bg-slate-100">
-                <div
-                  className="absolute inset-y-0 left-0 flex min-w-[4.5rem] items-center px-2.5 transition-all"
-                  style={{
-                    width: `${Math.max(barPct, item.pctAtOrAbove7 == null ? 0 : 14)}%`,
-                    background: item.color,
-                  }}
-                >
-                  <span className="truncate text-[10px] font-bold uppercase tracking-wide text-white drop-shadow-sm">
-                    {item.title}
-                  </span>
-                </div>
-                <span
-                  className={`absolute right-2 top-1/2 z-20 -translate-y-1/2 text-[11px] font-bold tabular-nums ${
-                    pctOnFill
-                      ? "text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.55)]"
-                      : "text-slate-900"
-                  }`}
-                >
-                  {pctLabel}
-                </span>
+            <div key={item.title} className="space-y-1">
+              <div className="grid grid-cols-2 gap-2">
+                <ZoneMeterBar
+                  title={item.title}
+                  barPct={avgPct}
+                  color={item.avgColor}
+                  markers={[]}
+                  valueLabel={item.avgScore == null ? "—" : item.avgScore.toFixed(1)}
+                  minFill={item.avgScore == null ? 0 : 28}
+                />
+                <ZoneMeterBar
+                  barPct={usersPct}
+                  color={item.pctColor}
+                  markers={markers}
+                  valueLabel={
+                    item.pctAtOrAbove7 == null ? "—" : `${Math.round(item.pctAtOrAbove7)}%`
+                  }
+                  minFill={item.pctAtOrAbove7 == null ? 0 : 22}
+                />
               </div>
+              {item.description ? (
+                <p className="text-[8px] font-medium leading-tight text-slate-500">
+                  {item.description}
+                </p>
+              ) : null}
             </div>
           );
         })}
       </div>
 
-      {/* Zone labels aligned to marker columns — no mid-word breaks */}
-      <div className="grid grid-cols-3 gap-1 pt-0.5">
-        {zones.map((zone) => (
-          <p
-            key={zone.label}
-            className="text-center text-[10px] font-semibold leading-tight"
-            style={{ color: zone.color }}
-          >
-            {zone.label}
+      <div className="space-y-1">
+        {/* Zone scale — under right-hand (% users) bars */}
+        <div className="grid grid-cols-2 gap-2">
+          <div />
+          <div className="grid grid-cols-3 gap-1">
+            {zones.map((zone) => (
+              <p
+                key={zone.label}
+                className="text-center text-[9px] font-medium leading-tight"
+                style={{ color: zone.color }}
+              >
+                {zone.label}
+              </p>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <p className="text-center text-[9px] font-medium leading-none text-slate-500">
+            {avgCaption}
           </p>
-        ))}
+          <p className="text-center text-[9px] font-medium leading-none text-slate-500">
+            % users with &gt;7
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -468,6 +652,7 @@ export function WellbeingDashboard({
   featureRows,
   orgSummaryRows,
   chatMonthlyRows = [],
+  mauMonthlyRows = [],
 }: Props) {
   const dashboardExportRef = useRef<HTMLDivElement>(null);
   const [exportingDashboard, setExportingDashboard] = useState(false);
@@ -508,6 +693,20 @@ export function WellbeingDashboard({
     }));
   }, [year, selectedMonth, valueFor]);
 
+  /** MAU active-users trend over the same rolling 6 months. */
+  const mauSixMonthTrendPoints = useMemo(() => {
+    if (selectedMonth == null) return [];
+    const byKey = new Map<string, number>();
+    for (const row of mauMonthlyRows) {
+      const key = `${row.year}-${row.month}`;
+      byKey.set(key, (byKey.get(key) || 0) + (row.activeUsers || 0));
+    }
+    return monthsEndingAt(year, selectedMonth, 6).map((slot) => ({
+      label: slot.label,
+      value: byKey.has(slot.key) ? byKey.get(slot.key)! : null,
+    }));
+  }, [year, selectedMonth, mauMonthlyRows]);
+
   const latestWellbeing = selectedMonth == null ? null : valueFor(year, selectedMonth);
 
   const threeMonthAvg = useMemo(() => {
@@ -536,6 +735,7 @@ export function WellbeingDashboard({
 
   const categoryScores = useMemo(() => {
     const pick = (key: string) => {
+      const scores: number[] = [];
       let usersWithData = 0;
       let usersAtOrAbove = 0;
       let hasPct = false;
@@ -543,6 +743,7 @@ export function WellbeingDashboard({
         if (selectedMonth != null && (row.month !== selectedMonth || row.year !== year)) continue;
         const metric = row.categories[key];
         if (!metric) continue;
+        if (metric.avgScore != null) scores.push(metric.avgScore);
         const withData = metric.usersWithData || 0;
         usersWithData += withData;
         if (metric.usersAtOrAboveThreshold != null) {
@@ -554,6 +755,7 @@ export function WellbeingDashboard({
         }
       }
       return {
+        score: avg(scores),
         pctAtOrAbove7:
           hasPct && usersWithData > 0
             ? Number(((usersAtOrAbove / usersWithData) * 100).toFixed(1))
@@ -568,6 +770,9 @@ export function WellbeingDashboard({
     };
   }, [categoryRows, selectedMonth, year]);
 
+  /** Top Features uses selected months only, capped at the most recent 6. */
+  const topFeatureMonths = useMemo(() => new Set(selectedMonths.slice(-6)), [selectedMonths]);
+
   const topFeatures = useMemo(() => {
     // Exclude shell/session pages, dashboard/sliders, personalize (own panel), and errors.
     const EXCLUDED_TOP_FEATURE_PAGES = new Set([
@@ -579,7 +784,7 @@ export function WellbeingDashboard({
     ]);
     const byPage = new Map<string, { label: string; users: number; views: number }>();
     for (const row of featureRows) {
-      if (selectedMonth != null && (row.month !== selectedMonth || row.year !== year)) continue;
+      if (row.year !== year || !topFeatureMonths.has(row.month)) continue;
       const pageKey = String(row.page || "").toLowerCase();
       if (EXCLUDED_TOP_FEATURE_PAGES.has(pageKey) || pageKey.startsWith("error")) continue;
       const normalized = normalizeFeaturePage(row.page);
@@ -592,10 +797,10 @@ export function WellbeingDashboard({
       byPage.set(page, existing);
     }
 
-    // Chat = total User_Chat_session sessions for the selected month.
+    // Chat = total User_Chat_session sessions across the same selected months.
     let lifeCoachSessions = 0;
     for (const row of chatMonthlyRows) {
-      if (selectedMonth != null && (row.month !== selectedMonth || row.year !== year)) continue;
+      if (row.year !== year || !topFeatureMonths.has(row.month)) continue;
       lifeCoachSessions += row.sessionCount || 0;
     }
     if (lifeCoachSessions > 0) {
@@ -610,7 +815,7 @@ export function WellbeingDashboard({
       .map(([page, v]) => ({ page, ...v }))
       .sort((a, b) => b.users - a.users)
       .slice(0, 10);
-  }, [featureRows, chatMonthlyRows, selectedMonth, year]);
+  }, [featureRows, chatMonthlyRows, topFeatureMonths, year]);
 
   const maxFeatureUsers = Math.max(...topFeatures.map((f) => f.users), 1);
   /**
@@ -654,6 +859,25 @@ export function WellbeingDashboard({
       helpful,
       notHelpful,
       pct: total > 0 ? Number(((helpful / total) * 100).toFixed(1)) : null,
+    };
+  }, [wellbeingRows, inSixMonthWindow]);
+
+  /** Weighted in-app star rating (Feature_Feedback feature=app, 1–5) over rolling 6 months. */
+  const starRatingAvg = useMemo(() => {
+    let weighted = 0;
+    let weight = 0;
+    for (const row of wellbeingRows) {
+      if (!inSixMonthWindow(row.year, row.month)) continue;
+      const count = row.starRatingCount || 0;
+      // Guard: only 1–5 star scale (ignore any legacy non-app values).
+      if (row.starRating == null || count <= 0 || row.starRating < 1 || row.starRating > 5)
+        continue;
+      weighted += row.starRating * count;
+      weight += count;
+    }
+    return {
+      avg: weight > 0 ? Number((weighted / weight).toFixed(1)) : null,
+      count: weight,
     };
   }, [wellbeingRows, inSixMonthWindow]);
 
@@ -736,10 +960,10 @@ export function WellbeingDashboard({
         mainRow.style.minHeight = "0";
         // Stretch columns so Effectiveness / Personalize bottoms can align.
         mainRow.style.alignItems = "stretch";
-        // PDF widths: Wellbeing/MAU 35% | Risks/Drivers/Effectiveness 35% | Features+Personalize 30%
+        // PDF widths: Wellbeing/MAU 30% | Risks/Drivers/Effectiveness 40% | Features+Personalize 30%
         // Use fr so gap doesn't push past 100% width.
         mainRow.style.display = "grid";
-        mainRow.style.gridTemplateColumns = "minmax(0, 35fr) minmax(0, 35fr) minmax(0, 30fr)";
+        mainRow.style.gridTemplateColumns = "minmax(0, 30fr) minmax(0, 40fr) minmax(0, 30fr)";
         mainRow.style.gap = "12px";
       }
       if (mauPanel) {
@@ -912,58 +1136,63 @@ export function WellbeingDashboard({
           </div>
           <div
             className="grid gap-3"
-            style={{ gridTemplateColumns: "minmax(0, 35fr) minmax(0, 35fr) minmax(0, 30fr)" }}
+            style={{ gridTemplateColumns: "minmax(0, 30fr) minmax(0, 40fr) minmax(0, 30fr)" }}
             data-export-main-row
           >
-            {/* Left: Wellbeing Index + MAU (35%) */}
+            {/* Left: Wellbeing Index + MAU (30%) */}
             <div className="flex min-w-0 flex-col gap-3" data-export-left-col>
               <Panel label="WELLBEING INDEX" className="!overflow-visible">
                 <div className="relative mb-1 pr-5">
                   <div className="flex items-start justify-center gap-10">
                     <SemiGauge value={latestWellbeing} caption={latestLabel} />
-                    <SemiGauge value={threeMonthAvg} caption="3-months Avg" />
+                    <SemiGauge value={threeMonthAvg} caption="3-months" />
                   </div>
-                  <AreaTrend points={sixMonthTrendPoints} />
-                  <p className="absolute right-0 top-1/2 -translate-y-1/2 rotate-180 text-[11px] font-bold uppercase tracking-wide text-emerald-800 [writing-mode:vertical-rl]">
-                    &gt;6 is good
+                  <AreaTrend points={sixMonthTrendPoints} valueDomain="wellbeing" />
+                  <p className="absolute right-0 top-1/2 -translate-y-1/2 rotate-180 text-[9px] font-medium tracking-wide text-emerald-800 [writing-mode:vertical-rl]">
+                    &gt;6 is good. &gt;7 is ideal.
                   </p>
                 </div>
               </Panel>
 
               <Panel label="MAU" className="flex-1 !overflow-visible" exportAttr="mau">
-                <div className="mb-2 grid grid-cols-3 gap-x-2 gap-y-1.5 text-[11px] text-slate-700 sm:grid-cols-6">
-                  <div className="text-center">
-                    <p className="text-[10px] font-semibold uppercase text-slate-600">Month</p>
-                    <p className="font-semibold">{latestLabel}</p>
+                <div className="mb-2 space-y-1 text-[11px] text-slate-700">
+                  <div className="grid grid-cols-6 gap-x-1">
+                    {[
+                      "Month",
+                      "Active Users",
+                      "Active %",
+                      "Repeat Users",
+                      "Repeat %",
+                      "Enabled",
+                    ].map((label) => (
+                      <p
+                        key={label}
+                        className="text-center text-[9px] font-normal uppercase leading-tight text-slate-600"
+                      >
+                        {label}
+                      </p>
+                    ))}
                   </div>
-                  <div className="text-center">
-                    <p className="text-[10px] font-semibold uppercase text-slate-600">
-                      Active Users
+                  <div className="grid grid-cols-6 gap-x-1">
+                    <p className="text-center font-bold tabular-nums">{latestLabel}</p>
+                    <p className="text-center font-bold tabular-nums">
+                      {mau.active.toLocaleString()}
                     </p>
-                    <p className="font-semibold">{mau.active.toLocaleString()}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[10px] font-semibold uppercase text-slate-600">Active %</p>
-                    <p className="font-semibold">{mau.pct == null ? "—" : `${mau.pct}%`}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[10px] font-semibold uppercase text-slate-600">
-                      Repeat Users
+                    <p className="text-center font-bold tabular-nums">
+                      {mau.pct == null ? "—" : `${mau.pct}%`}
                     </p>
-                    <p className="font-semibold">{mau.repeat.toLocaleString()}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[10px] font-semibold uppercase text-slate-600">Repeat %</p>
-                    <p className="font-semibold">
+                    <p className="text-center font-bold tabular-nums">
+                      {mau.repeat.toLocaleString()}
+                    </p>
+                    <p className="text-center font-bold tabular-nums">
                       {mau.repeatPct == null ? "—" : `${mau.repeatPct}%`}
                     </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-[10px] font-semibold uppercase text-slate-600">Enabled</p>
-                    <p className="font-semibold">{mau.registered.toLocaleString()}</p>
+                    <p className="text-center font-bold tabular-nums">
+                      {mau.registered.toLocaleString()}
+                    </p>
                   </div>
                 </div>
-                <AreaTrend points={sixMonthTrendPoints} />
+                <AreaTrend points={mauSixMonthTrendPoints} />
               </Panel>
             </div>
 
@@ -971,25 +1200,32 @@ export function WellbeingDashboard({
             <div className="flex min-h-0 min-w-0 flex-col gap-3" data-export-mid-col>
               <Panel label="RISKS" className="flex-1">
                 <ZoneMeterGroup
+                  avgCaption="<6 is ideal. <7 is good."
                   items={[
                     {
                       title: "Burnout Risk",
+                      avgScore: categoryScores.burnoutRisk.score,
+                      avgColor: riskAvgBarColor(categoryScores.burnoutRisk.score),
                       pctAtOrAbove7: categoryScores.burnoutRisk.pctAtOrAbove7,
-                      color: riskBarColor(categoryScores.burnoutRisk.pctAtOrAbove7),
+                      pctColor: riskPctBarColor(categoryScores.burnoutRisk.pctAtOrAbove7),
+                      description: "Metric of Workload, Pressure & Low Self-care",
                     },
                     {
                       title: "Stress",
+                      avgScore: categoryScores.stress.score,
+                      avgColor: riskAvgBarColor(categoryScores.stress.score),
                       pctAtOrAbove7: categoryScores.stress.pctAtOrAbove7,
-                      color: riskBarColor(categoryScores.stress.pctAtOrAbove7),
+                      pctColor: riskPctBarColor(categoryScores.stress.pctAtOrAbove7),
+                      description: "Metric of Stress, Anxiety & Irritability",
                     },
                   ]}
                   markers={[
-                    { at: 40, color: "#16a34a" },
-                    { at: 70, color: "#dc2626" },
+                    { at: 33.3, color: "#16a34a" },
+                    { at: 66.6, color: "#dc2626" },
                   ]}
                   zones={[
                     { label: "Acceptable", color: "#16a34a" },
-                    { label: "Cautiously Neutral", color: "#ca8a04" },
+                    { label: "Cautiously Neutral", color: "#eab308" },
                     { label: "Needs Attention", color: "#dc2626" },
                   ]}
                 />
@@ -1000,81 +1236,97 @@ export function WellbeingDashboard({
                   items={[
                     {
                       title: "Belonging",
+                      avgScore: categoryScores.belonging.score,
+                      avgColor: driverAvgBarColor(categoryScores.belonging.score),
                       pctAtOrAbove7: categoryScores.belonging.pctAtOrAbove7,
-                      color: driverBarColor(categoryScores.belonging.pctAtOrAbove7),
+                      pctColor: driverPctBarColor(categoryScores.belonging.pctAtOrAbove7),
+                      description:
+                        "Metric of Good Relationships, Psychological Safety & Loneliness (inverse)",
                     },
                     {
                       title: "Energy",
+                      avgScore: categoryScores.energy.score,
+                      avgColor: driverAvgBarColor(categoryScores.energy.score),
                       pctAtOrAbove7: categoryScores.energy.pctAtOrAbove7,
-                      color: driverBarColor(categoryScores.energy.pctAtOrAbove7),
+                      pctColor: driverPctBarColor(categoryScores.energy.pctAtOrAbove7),
+                      description: "Metric of Motivation & Positivity",
                     },
                   ]}
                   markers={[
-                    { at: 40, color: "#dc2626" },
-                    { at: 70, color: "#16a34a" },
+                    { at: 33.3, color: "#dc2626" },
+                    { at: 66.6, color: "#16a34a" },
                   ]}
                   zones={[
                     { label: "Needs Attention", color: "#dc2626" },
-                    { label: "Cautiously Neutral", color: "#ca8a04" },
+                    { label: "Cautiously Neutral", color: "#eab308" },
                     { label: "Positive", color: "#16a34a" },
                   ]}
                 />
               </Panel>
 
-              <Panel
-                label="Effectiveness"
-                className="min-h-[6.75rem] shrink-0"
-                exportAttr="effectiveness"
-              >
-                <div className="flex h-full flex-col justify-center space-y-2">
-                  <div className="flex items-center justify-between gap-2 text-[11px]">
-                    <span className="font-medium text-slate-700">
-                      Helpful vs Not Helpful · 6 mo
-                    </span>
-                    <span className="shrink-0 font-semibold text-slate-800">
+              <div className="grid shrink-0 grid-cols-2 gap-3">
+                <Panel label="Effectiveness" className="min-h-[6.75rem]" exportAttr="effectiveness">
+                  <div className="flex h-full flex-col justify-center space-y-2">
+                    <p className="text-center text-[11px] font-semibold text-slate-800">
                       {effectiveness.pct == null ? "—" : `${effectiveness.pct}%`}
-                    </span>
-                  </div>
-                  <div className="flex h-3 overflow-hidden rounded-sm bg-slate-100">
-                    {effectiveness.pct != null ? (
-                      <>
-                        <div
-                          className="h-full transition-all"
-                          style={{
-                            width: `${effectiveness.pct}%`,
-                            background: "#059669",
-                          }}
-                          title={`Helpful: ${effectiveness.helpful.toLocaleString()}`}
-                        />
-                        <div
-                          className="h-full transition-all"
-                          style={{
-                            width: `${100 - effectiveness.pct}%`,
-                            background: "#be123c",
-                          }}
-                          title={`Not Helpful: ${effectiveness.notHelpful.toLocaleString()}`}
-                        />
-                      </>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
-                    <span className="inline-flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-sm" style={{ background: "#059669" }} />
-                      Helpful{" "}
-                      <span className="font-semibold text-slate-700">
-                        {effectiveness.helpful.toLocaleString()}
+                    </p>
+                    <div className="flex h-3 overflow-hidden rounded-sm bg-slate-100">
+                      {effectiveness.pct != null ? (
+                        <>
+                          <div
+                            className="h-full transition-all"
+                            style={{
+                              width: `${effectiveness.pct}%`,
+                              background: "#059669",
+                            }}
+                            title={`Helpful: ${effectiveness.helpful.toLocaleString()}`}
+                          />
+                          <div
+                            className="h-full transition-all"
+                            style={{
+                              width: `${100 - effectiveness.pct}%`,
+                              background: "#be123c",
+                            }}
+                            title={`Not Helpful: ${effectiveness.notHelpful.toLocaleString()}`}
+                          />
+                        </>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-sm" style={{ background: "#059669" }} />
+                        Helpful{" "}
+                        <span className="font-semibold text-slate-700">
+                          {effectiveness.helpful.toLocaleString()}
+                        </span>
                       </span>
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-sm" style={{ background: "#be123c" }} />
-                      Not Helpful{" "}
-                      <span className="font-semibold text-slate-700">
-                        {effectiveness.notHelpful.toLocaleString()}
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-sm" style={{ background: "#be123c" }} />
+                        Not Helpful{" "}
+                        <span className="font-semibold text-slate-700">
+                          {effectiveness.notHelpful.toLocaleString()}
+                        </span>
                       </span>
-                    </span>
+                    </div>
                   </div>
-                </div>
-              </Panel>
+                </Panel>
+
+                <Panel label="Star Rating" className="min-h-[6.75rem]" exportAttr="star-rating">
+                  <div className="flex h-full flex-col justify-center space-y-2">
+                    <p className="text-center text-[11px] font-semibold tabular-nums text-slate-800">
+                      {starRatingAvg.avg == null ? "—" : starRatingAvg.avg.toFixed(1)}
+                    </p>
+                    <div className="flex items-center justify-center py-0.5">
+                      <StarRatingRow value={starRatingAvg.avg} />
+                    </div>
+                    <p className="text-center text-[10px] text-slate-500">
+                      {starRatingAvg.count > 0
+                        ? `${starRatingAvg.count.toLocaleString()} ratings`
+                        : "No ratings"}
+                    </p>
+                  </div>
+                </Panel>
+              </div>
             </div>
 
             {/* Right: Top Features fills; Personalize same height band as Effectiveness */}
@@ -1091,7 +1343,8 @@ export function WellbeingDashboard({
                       return (
                         <div
                           key={f.page}
-                          className="relative h-7 overflow-hidden rounded-md bg-slate-100"
+                          className="relative h-7 overflow-hidden rounded-md"
+                          style={{ background: "#e2e8f0" }}
                         >
                           <div
                             className="absolute inset-y-0 left-0 flex min-w-[5.5rem] items-center px-2.5 transition-all"
@@ -1127,7 +1380,10 @@ export function WellbeingDashboard({
                 exportAttr="personalize"
               >
                 <div className="flex h-full flex-col justify-center space-y-1.5">
-                  <div className="relative h-7 overflow-hidden rounded-md bg-slate-100">
+                  <div
+                    className="relative h-7 overflow-hidden rounded-md"
+                    style={{ background: "#e2e8f0" }}
+                  >
                     <div
                       className="absolute inset-y-0 left-0 flex min-w-[5.5rem] items-center px-2.5 transition-all"
                       style={{
