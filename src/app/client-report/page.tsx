@@ -487,7 +487,7 @@ const chunk = <T,>(items: T[], size: number): T[][] => {
 
 const COLUMN_INFO: Record<string, string> = {
   wellbeingIndex:
-    "Average of available scores among Brew, Gratitude, and Mindful Minute value. Brew/Gratitude = mean of non-null values. Mindful Minute value = (yes×8 + no×3 + maybe×5.5) ÷ (yes+no+maybe). Only present scores are averaged.",
+    "Count-weighted average of Brew, Gratitude, and Mindful Minute: (brew×brewCount + gratitude×gratitudeCount + mm×mmCount) ÷ (brewCount+gratitudeCount+mmCount). Brew/Gratitude = mean of non-null values. Mindful Minute = (yes×8 + no×3 + maybe×5.5) ÷ (yes+no+maybe).",
   mm: "Mindful Minute value = mean of (yes×8 + no×3 + maybe×5.5) ÷ (yes+no+maybe) for rows with yes/no/maybe answers that month.",
   effectiveness:
     "Effectiveness % = (count of Helpful) ÷ (Helpful + Not Helpful) × 100. From Feature_Feedback thumbs (likes / dislikes). Shown as — when there are no helpful/not-helpful responses that month.",
@@ -847,30 +847,36 @@ export default function WellbeingAnalyticsPage() {
     let helpful = 0;
     let notHelpful = 0;
     for (const row of tableRows) {
-      if (row.wellbeingIndex != null) {
-        wellbeingWeighted += row.wellbeingIndex;
-        wellbeingWeight += 1;
+      const rowBrewCount = row.brewCount || 0;
+      const rowGratitudeCount = row.gratitudeCount || 0;
+      const rowMmCount = row.mmCount || 0;
+      // Rebuild WI from metric averages × counts so totals stay count-weighted across months.
+      if (row.brew != null && rowBrewCount > 0) {
+        wellbeingWeighted += row.brew * rowBrewCount;
+        wellbeingWeight += rowBrewCount;
+        brewWeighted += row.brew * rowBrewCount;
+        brewWeight += rowBrewCount;
       }
-      if (row.brew != null) {
-        brewWeighted += row.brew;
-        brewWeight += 1;
+      if (row.gratitude != null && rowGratitudeCount > 0) {
+        wellbeingWeighted += row.gratitude * rowGratitudeCount;
+        wellbeingWeight += rowGratitudeCount;
+        gratitudeWeighted += row.gratitude * rowGratitudeCount;
+        gratitudeWeight += rowGratitudeCount;
+      }
+      if (row.mm != null && rowMmCount > 0) {
+        wellbeingWeighted += row.mm * rowMmCount;
+        wellbeingWeight += rowMmCount;
+        mmWeighted += row.mm * rowMmCount;
+        mmWeight += rowMmCount;
       }
       if (row.starRating != null && (row.starRatingCount || 0) > 0) {
         starRatingWeighted += row.starRating * (row.starRatingCount || 0);
         starRatingWeight += row.starRatingCount || 0;
       }
-      if (row.gratitude != null) {
-        gratitudeWeighted += row.gratitude;
-        gratitudeWeight += 1;
-      }
-      if (row.mm != null) {
-        mmWeighted += row.mm;
-        mmWeight += 1;
-      }
-      brewCount += row.brewCount || 0;
+      brewCount += rowBrewCount;
       starRatingCount += row.starRatingCount || 0;
-      gratitudeCount += row.gratitudeCount || 0;
-      mmCount += row.mmCount || 0;
+      gratitudeCount += rowGratitudeCount;
+      mmCount += rowMmCount;
       totalCount += row.totalCount || 0;
       helpful += row.helpful || 0;
       notHelpful += row.notHelpful || 0;
