@@ -277,7 +277,7 @@ function SemiGauge({ value, caption }: { value: number | null; caption: string }
   const cy = 54;
   const tip = value == null ? null : gaugePoint(cx, cy, r - 1, value);
   const labelR = r + stroke / 2 + 9;
-  const scaleLabels = [0, 2, 4, 6, 8, 10];
+  const scaleLabels = [0, 2, 4, 6, 7, 8, 10];
 
   return (
     <div className="flex w-[8.5rem] shrink-0 flex-col items-center">
@@ -336,11 +336,9 @@ function SemiGauge({ value, caption }: { value: number | null; caption: string }
   );
 }
 
-function formatTrendValue(value: number): string {
-  if (Math.abs(value) >= 1000) {
-    return Math.round(value).toLocaleString();
-  }
-  return Number(value).toFixed(1);
+function formatTrendValue(value: number, valueDomain: "auto" | "wellbeing" = "auto"): string {
+  if (valueDomain === "wellbeing") return Number(value).toFixed(1);
+  return Math.round(value).toLocaleString();
 }
 
 function AreaTrend({
@@ -420,7 +418,7 @@ function AreaTrend({
                 fill="#334155"
                 style={{ fontSize: 11, fontWeight: 700 }}
               >
-                {formatTrendValue(Number(c.value))}
+                {formatTrendValue(Number(c.value), valueDomain)}
               </text>
             </>
           )}
@@ -493,6 +491,8 @@ function StarRatingRow({ value }: { value: number | null }) {
   );
 }
 
+type ZoneMeterMarker = { at: number; color: string; label?: string };
+
 function ZoneMeterBar({
   title,
   barPct,
@@ -505,13 +505,14 @@ function ZoneMeterBar({
   barPct: number;
   color: string;
   valueLabel: string;
-  markers: Array<{ at: number; color: string }>;
+  markers: ZoneMeterMarker[];
   minFill?: number;
 }) {
   const onFill = barPct >= 88;
   const fillWidth = Math.max(barPct, barPct > 0 ? minFill : 0);
+  const hasMarkerLabels = markers.some((m) => m.label);
   return (
-    <div className="relative isolate h-6">
+    <div className={`relative isolate h-6 ${hasMarkerLabels ? "mt-3.5" : ""}`}>
       {/* Track + fill clipped to the rounded bar */}
       <div className="absolute inset-0 z-0 overflow-hidden rounded-md">
         <div className="absolute inset-0" style={{ background: "#e2e8f0" }} />
@@ -533,13 +534,21 @@ function ZoneMeterBar({
       </div>
       {/* Scale ticks only outside the bar (above + below) — always show both thresholds */}
       <div
-        className="pointer-events-none absolute inset-x-0 -top-1.5 -bottom-1.5 z-[5]"
+        className="pointer-events-none absolute inset-x-0 -top-3.5 -bottom-1.5 z-[5]"
         aria-hidden
       >
         {markers.map((m) => (
           <Fragment key={`${m.at}-${m.color}`}>
+            {m.label ? (
+              <span
+                className="absolute top-0 -translate-x-1/2 text-[11px] font-bold tabular-nums leading-none"
+                style={{ left: `${m.at}%`, color: m.color }}
+              >
+                {m.label}
+              </span>
+            ) : null}
             <div
-              className="absolute top-0 h-1.5 w-0.5 opacity-55"
+              className={`absolute w-0.5 opacity-55 ${m.label ? "top-3 h-1.5" : "top-0 h-1.5"}`}
               style={{ left: `${m.at}%`, background: m.color }}
             />
             <div
@@ -560,31 +569,36 @@ function ZoneMeterBar({
   );
 }
 
+/** Map avg score on a 1–10 scale onto bar width (score 1 → 0%, score 10 → 100%). */
+function avgScoreBarPct(score: number): number {
+  return clamp(((score - 1) / 9) * 100, 0, 100);
+}
+
 /**
- * Each metric plots two adjacent bars: avg score (0–10) | % users with >7.
- * Left markers at score 4/7 (40%/70%); right markers at 33.3%/66.6%.
+ * Each metric plots two adjacent bars: avg score (1–10) | % users with >7.
+ * Left markers at score 4/7 (≈33.3%/66.7%); right markers at 33.3%/66.6%.
  */
 function ZoneMeterGroup({
   items,
   markers,
   zones,
   avgMarkers = [],
-  avgCaption = "<4 Needs Attention. 4–7 Cautiously Neutral. >7 is ideal.",
+  avgZones = [],
 }: {
   items: ZoneMeterItem[];
   /** Marker positions as % of the right-hand bar track (33.3 / 66.6). */
-  markers: Array<{ at: number; color: string }>;
+  markers: ZoneMeterMarker[];
   zones: Array<{ label: string; color: string }>;
-  /** Marker positions on the average (left) bars — score 4 → 40%, score 7 → 70%. */
-  avgMarkers?: Array<{ at: number; color: string }>;
-  /** Guidance under the average (left) bars. */
-  avgCaption?: string;
+  /** Marker positions on the average (left) bars — score 4 → ≈33.3%, score 7 → ≈66.7%. */
+  avgMarkers?: ZoneMeterMarker[];
+  /** Colored zone labels under the average (left) bars — same style as Caution/Urgent/etc. */
+  avgZones?: Array<{ label: string; color: string }>;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col justify-center gap-1.5">
       <div className="space-y-2 py-0.5">
         {items.map((item) => {
-          const avgPct = item.avgScore == null ? 0 : clamp((item.avgScore / 10) * 100, 0, 100);
+          const avgPct = item.avgScore == null ? 0 : avgScoreBarPct(item.avgScore);
           const usersPct = item.pctAtOrAbove7 == null ? 0 : clamp(item.pctAtOrAbove7, 0, 100);
           return (
             <div key={item.title} className="space-y-1">
@@ -618,9 +632,19 @@ function ZoneMeterGroup({
       </div>
 
       <div className="space-y-1">
-        {/* Zone scale — under right-hand (% users) bars */}
+        {/* Zone scales — left avg bars (1–4 / 4–7 / 7–10) | right % users (equal thirds) */}
         <div className="grid grid-cols-2 gap-2">
-          <div />
+          <div className="grid grid-cols-3 gap-1">
+            {avgZones.map((zone) => (
+              <p
+                key={`avg-${zone.label}`}
+                className="text-center text-[9px] font-medium leading-tight"
+                style={{ color: zone.color }}
+              >
+                {zone.label}
+              </p>
+            ))}
+          </div>
           <div className="grid grid-cols-3 gap-1">
             {zones.map((zone) => (
               <p
@@ -634,11 +658,9 @@ function ZoneMeterGroup({
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <p className="text-center text-[9px] font-medium leading-tight text-slate-500">
-            {avgCaption}
-          </p>
+          <div />
           <p className="text-center text-[9px] font-medium leading-none text-slate-500">
-            % users with &gt;7
+            % users with score &gt;7
           </p>
         </div>
       </div>
@@ -1201,10 +1223,14 @@ export function WellbeingDashboard({
             <div className="flex min-h-0 min-w-0 flex-col gap-3" data-export-mid-col>
               <Panel label="RISKS" className="flex-1">
                 <ZoneMeterGroup
-                  avgCaption="<4 is Ideal. 4–7 Cautiously Neutral. >7 is Needs Attention"
                   avgMarkers={[
-                    { at: 40, color: "#16a34a" },
-                    { at: 70, color: "#dc2626" },
+                    { at: avgScoreBarPct(4), color: "#16a34a", label: "4" },
+                    { at: avgScoreBarPct(7), color: "#dc2626", label: "7" },
+                  ]}
+                  avgZones={[
+                    { label: "Ideal", color: "#16a34a" },
+                    { label: "Cautiously Neutral", color: "#eab308" },
+                    { label: "Needs Attention", color: "#dc2626" },
                   ]}
                   items={[
                     {
@@ -1225,8 +1251,8 @@ export function WellbeingDashboard({
                     },
                   ]}
                   markers={[
-                    { at: 33.3, color: "#eab308" },
-                    { at: 66.6, color: "#dc2626" },
+                    { at: 33.3, color: "#eab308", label: "33.3" },
+                    { at: 66.6, color: "#dc2626", label: "66.6" },
                   ]}
                   zones={[
                     { label: "Caution", color: "#eab308" },
@@ -1238,10 +1264,14 @@ export function WellbeingDashboard({
 
               <Panel label="DRIVERS" className="flex-1">
                 <ZoneMeterGroup
-                  avgCaption="<4 Needs Attention. 4–7 Cautiously Neutral. >7 is ideal"
                   avgMarkers={[
-                    { at: 40, color: "#dc2626" },
-                    { at: 70, color: "#16a34a" },
+                    { at: avgScoreBarPct(4), color: "#dc2626", label: "4" },
+                    { at: avgScoreBarPct(7), color: "#16a34a", label: "7" },
+                  ]}
+                  avgZones={[
+                    { label: "Needs Attention", color: "#dc2626" },
+                    { label: "Cautiously Neutral", color: "#eab308" },
+                    { label: "Ideal", color: "#16a34a" },
                   ]}
                   items={[
                     {
@@ -1263,8 +1293,8 @@ export function WellbeingDashboard({
                     },
                   ]}
                   markers={[
-                    { at: 33.3, color: "#eab308" },
-                    { at: 66.6, color: "#16a34a" },
+                    { at: 33.3, color: "#eab308", label: "33.3" },
+                    { at: 66.6, color: "#16a34a", label: "66.6" },
                   ]}
                   zones={[
                     { label: "Concern", color: "#eab308" },
@@ -1295,7 +1325,7 @@ export function WellbeingDashboard({
                             className="h-full transition-all"
                             style={{
                               width: `${100 - effectiveness.pct}%`,
-                              background: "#be123c",
+                              background: "#f87171",
                             }}
                             title={`Not Helpful: ${effectiveness.notHelpful.toLocaleString()}`}
                           />
@@ -1311,7 +1341,7 @@ export function WellbeingDashboard({
                         </span>
                       </span>
                       <span className="inline-flex items-center gap-1">
-                        <span className="h-2 w-2 rounded-sm" style={{ background: "#be123c" }} />
+                        <span className="h-2 w-2 rounded-sm" style={{ background: "#f87171" }} />
                         Not Helpful{" "}
                         <span className="font-semibold text-slate-700">
                           {effectiveness.notHelpful.toLocaleString()}
