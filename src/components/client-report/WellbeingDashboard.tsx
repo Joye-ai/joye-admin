@@ -153,7 +153,7 @@ function normalizeFeaturePage(page: string): { page: string; label: string } {
     .trim()
     .toLowerCase();
   if (MTG_FEATURE_PAGES.has(key)) {
-    return { page: "mtg", label: "MTG" };
+    return { page: "mtg", label: "Make Today Great" };
   }
   if (key === "insight" || key === "insights") {
     return { page: "insight", label: "Trends" };
@@ -205,7 +205,7 @@ function driverAvgBarColor(score: number | null): string {
 function driverPctBarColor(pctAtOrAbove7: number | null): string {
   if (pctAtOrAbove7 == null) return "#cbd5e1";
   if (pctAtOrAbove7 < 33.3) return "#eab308";
-  if (pctAtOrAbove7 < 66.6) return "#22c55e";
+  if (pctAtOrAbove7 < 66.6) return "#84cc16";
   return "#16a34a";
 }
 
@@ -275,9 +275,10 @@ function SemiGauge({ value, caption }: { value: number | null; caption: string }
   const stroke = 9;
   const cx = 64;
   const cy = 54;
-  const tip = value == null ? null : gaugePoint(cx, cy, r - 1, value);
+  // Stop short of the arc's inner edge (arc is centered on r with stroke width).
+  const tip = value == null ? null : gaugePoint(cx, cy, r - stroke / 2 - 3, value);
   const labelR = r + stroke / 2 + 9;
-  const scaleLabels = [0, 2, 4, 6, 7, 8, 10];
+  const scaleLabels = [0, 2, 4, 6, 7, 10];
 
   return (
     <div className="flex w-[8.5rem] shrink-0 flex-col items-center">
@@ -449,48 +450,6 @@ type ZoneMeterItem = {
   description?: string;
 };
 
-/** Five-star display for a 0–5 average (supports partial fill). */
-function StarRatingRow({ value }: { value: number | null }) {
-  const score = value == null ? 0 : clamp(value, 0, 5);
-  return (
-    <div
-      className="flex items-center gap-0.5"
-      role="img"
-      aria-label={value == null ? "No star rating" : `${value.toFixed(1)} out of 5 stars`}
-    >
-      {[0, 1, 2, 3, 4].map((i) => {
-        const fill = clamp(score - i, 0, 1);
-        return (
-          <span key={i} className="relative inline-block h-3.5 w-3.5">
-            <svg
-              viewBox="0 0 24 24"
-              className="absolute inset-0 h-full w-full text-slate-200"
-              aria-hidden
-            >
-              <path
-                fill="currentColor"
-                d="M12 2.5l2.9 5.88 6.49.94-4.7 4.58 1.11 6.47L12 17.77l-5.8 3.05 1.11-6.47-4.7-4.58 6.49-.94L12 2.5z"
-              />
-            </svg>
-            <span
-              className="absolute inset-0 overflow-hidden"
-              style={{ width: `${fill * 100}%` }}
-              aria-hidden
-            >
-              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-amber-400">
-                <path
-                  fill="currentColor"
-                  d="M12 2.5l2.9 5.88 6.49.94-4.7 4.58 1.11 6.47L12 17.77l-5.8 3.05 1.11-6.47-4.7-4.58 6.49-.94L12 2.5z"
-                />
-              </svg>
-            </span>
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
 type ZoneMeterMarker = { at: number; color: string; label?: string };
 
 function ZoneMeterBar({
@@ -500,6 +459,7 @@ function ZoneMeterBar({
   valueLabel,
   markers,
   minFill = 14,
+  markerEdges = "both",
 }: {
   title?: string;
   barPct: number;
@@ -507,12 +467,16 @@ function ZoneMeterBar({
   valueLabel: string;
   markers: ZoneMeterMarker[];
   minFill?: number;
+  /** Which scale ticks to draw: first row uses top, last row uses bottom. */
+  markerEdges?: "top" | "bottom" | "both" | "none";
 }) {
   const onFill = barPct >= 88;
   const fillWidth = Math.max(barPct, barPct > 0 ? minFill : 0);
-  const hasMarkerLabels = markers.some((m) => m.label);
+  const showTop = markerEdges === "top" || markerEdges === "both";
+  const showBottom = markerEdges === "bottom" || markerEdges === "both";
+  const hasMarkerLabels = showTop && markers.some((m) => m.label);
   return (
-    <div className={`relative isolate h-6 ${hasMarkerLabels ? "mt-3.5" : ""}`}>
+    <div className={`relative isolate h-6 ${hasMarkerLabels ? "mt-5" : ""}`}>
       {/* Track + fill clipped to the rounded bar */}
       <div className="absolute inset-0 z-0 overflow-hidden rounded-md">
         <div className="absolute inset-0" style={{ background: "#e2e8f0" }} />
@@ -532,32 +496,35 @@ function ZoneMeterBar({
           ) : null}
         </div>
       </div>
-      {/* Scale ticks only outside the bar (above + below) — always show both thresholds */}
-      <div
-        className="pointer-events-none absolute inset-x-0 -top-3.5 -bottom-1.5 z-[5]"
-        aria-hidden
-      >
-        {markers.map((m) => (
-          <Fragment key={`${m.at}-${m.color}`}>
-            {m.label ? (
-              <span
-                className="absolute top-0 -translate-x-1/2 text-[11px] font-bold tabular-nums leading-none"
-                style={{ left: `${m.at}%`, color: m.color }}
-              >
-                {m.label}
-              </span>
-            ) : null}
-            <div
-              className={`absolute w-0.5 opacity-55 ${m.label ? "top-3 h-1.5" : "top-0 h-1.5"}`}
-              style={{ left: `${m.at}%`, background: m.color }}
-            />
-            <div
-              className="absolute bottom-0 h-1.5 w-0.5 opacity-55"
-              style={{ left: `${m.at}%`, background: m.color }}
-            />
-          </Fragment>
-        ))}
-      </div>
+      {/* Scale ticks sit on the bar border — top on first row, bottom on last row */}
+      {markers.length > 0 && markerEdges !== "none" ? (
+        <div className="pointer-events-none absolute inset-0 z-[5]" aria-hidden>
+          {markers.map((m) => (
+            <Fragment key={`${m.at}-${m.color}`}>
+              {showTop && m.label ? (
+                <span
+                  className="absolute bottom-full mb-2.5 -translate-x-1/2 text-[9px] font-normal tabular-nums leading-none"
+                  style={{ left: `${m.at}%`, color: m.color }}
+                >
+                  {m.label}
+                </span>
+              ) : null}
+              {showTop ? (
+                <div
+                  className="absolute bottom-full h-1.5 w-0.5 opacity-55"
+                  style={{ left: `${m.at}%`, background: m.color }}
+                />
+              ) : null}
+              {showBottom ? (
+                <div
+                  className="absolute top-full h-1.5 w-0.5 opacity-55"
+                  style={{ left: `${m.at}%`, background: m.color }}
+                />
+              ) : null}
+            </Fragment>
+          ))}
+        </div>
+      ) : null}
       <span
         className={`absolute right-1.5 top-1/2 z-20 -translate-y-1/2 text-[9px] font-bold tabular-nums ${
           onFill ? "text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.55)]" : "text-slate-900"
@@ -578,12 +545,17 @@ function avgScoreBarPct(score: number): number {
  * Each metric plots two adjacent bars: avg score (1–10) | % users with >7.
  * Left markers at score 4/7 (≈33.3%/66.7%); right markers at 33.3%/66.6%.
  */
+function stripMarkerLabels(markers: ZoneMeterMarker[]): ZoneMeterMarker[] {
+  return markers.map(({ at, color }) => ({ at, color }));
+}
+
 function ZoneMeterGroup({
   items,
   markers,
   zones,
   avgMarkers = [],
   avgZones = [],
+  pctCaption = "% users with score >7",
 }: {
   items: ZoneMeterItem[];
   /** Marker positions as % of the right-hand bar track (33.3 / 66.6). */
@@ -593,13 +565,22 @@ function ZoneMeterGroup({
   avgMarkers?: ZoneMeterMarker[];
   /** Colored zone labels under the average (left) bars — same style as Caution/Urgent/etc. */
   avgZones?: Array<{ label: string; color: string }>;
+  /** Caption under the right-hand (% users) bars. */
+  pctCaption?: string;
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-col justify-center gap-1.5">
+    <div className="flex h-full min-h-0 flex-col justify-center gap-1">
       <div className="space-y-2 py-0.5">
-        {items.map((item) => {
+        {items.map((item, index) => {
           const avgPct = item.avgScore == null ? 0 : avgScoreBarPct(item.avgScore);
           const usersPct = item.pctAtOrAbove7 == null ? 0 : clamp(item.pctAtOrAbove7, 0, 100);
+          const isFirst = index === 0;
+          const isLast = index === items.length - 1;
+          // Top ticks + numbers on first row; bottom ticks on last row; nothing between.
+          const markerEdges: "top" | "bottom" | "both" | "none" =
+            isFirst && isLast ? "both" : isFirst ? "top" : isLast ? "bottom" : "none";
+          const rowAvgMarkers = isFirst ? avgMarkers : stripMarkerLabels(avgMarkers);
+          const rowPctMarkers = isFirst ? markers : stripMarkerLabels(markers);
           return (
             <div key={item.title} className="space-y-1">
               <div className="grid grid-cols-2 gap-2">
@@ -607,14 +588,16 @@ function ZoneMeterGroup({
                   title={item.title}
                   barPct={avgPct}
                   color={item.avgColor}
-                  markers={avgMarkers}
+                  markers={markerEdges === "none" ? [] : rowAvgMarkers}
+                  markerEdges={markerEdges}
                   valueLabel={item.avgScore == null ? "—" : item.avgScore.toFixed(1)}
                   minFill={item.avgScore == null ? 0 : 28}
                 />
                 <ZoneMeterBar
                   barPct={usersPct}
                   color={item.pctColor}
-                  markers={markers}
+                  markers={markerEdges === "none" ? [] : rowPctMarkers}
+                  markerEdges={markerEdges}
                   valueLabel={
                     item.pctAtOrAbove7 == null ? "—" : `${Math.round(item.pctAtOrAbove7)}%`
                   }
@@ -622,7 +605,11 @@ function ZoneMeterGroup({
                 />
               </div>
               {item.description ? (
-                <p className="pt-1.5 text-[8px] font-medium leading-tight text-slate-500">
+                <p
+                  className={`pt-1 text-[8px] font-medium leading-tight text-slate-500 ${
+                    isLast ? "pb-0.5" : "pb-1"
+                  }`}
+                >
                   {item.description}
                 </p>
               ) : null}
@@ -631,7 +618,7 @@ function ZoneMeterGroup({
         })}
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-2">
         {/* Zone scales — left avg bars (1–4 / 4–7 / 7–10) | right % users (equal thirds) */}
         <div className="grid grid-cols-2 gap-2">
           <div className="grid grid-cols-3 gap-1">
@@ -657,16 +644,25 @@ function ZoneMeterGroup({
             ))}
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div />
-          <p className="text-center text-[9px] font-medium leading-none text-slate-500">
-            % users with score &gt;7
+        <div className="grid grid-cols-2 gap-2 pt-0.5">
+          <p className="text-center text-[10px] font-medium leading-none text-black">
+            Average score
+          </p>
+          <p className="text-center text-[10px] font-medium leading-none text-black">
+            {pctCaption}
           </p>
         </div>
       </div>
     </div>
   );
 }
+
+type DashboardChartType = "type1" | "type2";
+
+const CHART_TYPE_OPTIONS: Array<{ value: DashboardChartType; label: string }> = [
+  { value: "type1", label: "Type 1" },
+  { value: "type2", label: "Type 2" },
+];
 
 export function WellbeingDashboard({
   year,
@@ -681,6 +677,8 @@ export function WellbeingDashboard({
 }: Props) {
   const dashboardExportRef = useRef<HTMLDivElement>(null);
   const [exportingDashboard, setExportingDashboard] = useState(false);
+  const [chartType, setChartType] = useState<DashboardChartType>("type1");
+  const showMauActivePctAndEnabled = chartType === "type1";
 
   const selectedMonths = useMemo(() => [...months].map(Number).sort((a, b) => a - b), [months]);
 
@@ -852,9 +850,9 @@ export function WellbeingDashboard({
     slate: { fill: "#a8b4c4", text: "#243447" },
     indigo: { fill: "#a8b0e0", text: "#2a2f66" },
     mint: { fill: "#8fc9b0", text: "#1b4332" },
-    sky: { fill: "#9ec9e6", text: "#1e3a5f" },
+    sky: { fill: "#addaed", text: "#1e3a5f" },
   } as const;
-  const FEATURE_BAR_PALETTE: keyof typeof FEATURE_BAR_PALETTES = "mint";
+  const FEATURE_BAR_PALETTE: keyof typeof FEATURE_BAR_PALETTES = "sky";
   const FEATURE_BAR_COLOR = FEATURE_BAR_PALETTES[FEATURE_BAR_PALETTE].fill;
   const FEATURE_BAR_TEXT = FEATURE_BAR_PALETTES[FEATURE_BAR_PALETTE].text;
 
@@ -884,25 +882,6 @@ export function WellbeingDashboard({
       helpful,
       notHelpful,
       pct: total > 0 ? Number(((helpful / total) * 100).toFixed(1)) : null,
-    };
-  }, [wellbeingRows, inSixMonthWindow]);
-
-  /** Weighted in-app star rating (Feature_Feedback feature=app, 1–5) over rolling 6 months. */
-  const starRatingAvg = useMemo(() => {
-    let weighted = 0;
-    let weight = 0;
-    for (const row of wellbeingRows) {
-      if (!inSixMonthWindow(row.year, row.month)) continue;
-      const count = row.starRatingCount || 0;
-      // Guard: only 1–5 star scale (ignore any legacy non-app values).
-      if (row.starRating == null || count <= 0 || row.starRating < 1 || row.starRating > 5)
-        continue;
-      weighted += row.starRating * count;
-      weight += count;
-    }
-    return {
-      avg: weight > 0 ? Number((weighted / weight).toFixed(1)) : null,
-      count: weight,
     };
   }, [wellbeingRows, inSixMonthWindow]);
 
@@ -1142,10 +1121,27 @@ export function WellbeingDashboard({
       <div className="overflow-x-auto">
         <div ref={dashboardExportRef} className="min-w-[1400px] space-y-3 bg-slate-50/80 p-3">
           <div className="relative rounded-md border border-sky-300/80 bg-gradient-to-r from-sky-50 to-white px-4 py-3 text-center">
-            <p className="text-sm font-semibold text-slate-800">Wellbeing Dashboard</p>
-            <p className="text-xs font-medium text-slate-700">{platformName || "—"}</p>
+            <p className="mb-1.5 text-sm font-semibold text-slate-800">Joye Insights</p>
             <p className="text-xs text-slate-500">{monthsTenure}</p>
-            <div className="absolute right-3 top-3" data-export-ignore="true">
+            <div
+              className="absolute right-3 top-3 flex items-center gap-2"
+              data-export-ignore="true"
+            >
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                <span className="font-medium">Chart</span>
+                <select
+                  value={chartType}
+                  onChange={(e) => setChartType(e.target.value as DashboardChartType)}
+                  className="h-8 rounded-md border border-slate-300 bg-white px-2 text-[11px] font-medium text-slate-800 outline-none focus:border-sky-400"
+                  title="Select dashboard chart layout"
+                >
+                  {CHART_TYPE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <Button
                 type="button"
                 variant="outline"
@@ -1185,34 +1181,43 @@ export function WellbeingDashboard({
                 exportAttr="mau"
               >
                 <div className="mb-2 space-y-1 text-[11px] text-slate-700">
-                  <div className="grid grid-cols-5 gap-x-1">
-                    {["Active Users", "Active %", "Repeat Users", "Repeat %", "Enabled"].map(
-                      (label) => (
-                        <p
-                          key={label}
-                          className="text-center text-[9px] font-normal uppercase leading-tight text-slate-600"
-                        >
-                          {label}
-                        </p>
-                      ),
-                    )}
+                  <div
+                    className={`grid gap-x-1 ${showMauActivePctAndEnabled ? "grid-cols-5" : "grid-cols-3"}`}
+                  >
+                    {(showMauActivePctAndEnabled
+                      ? ["Active Users", "Active %", "Repeat Users", "Repeat %", "Enabled"]
+                      : ["Active Users", "Repeat Users", "Repeat %"]
+                    ).map((label) => (
+                      <p
+                        key={label}
+                        className="text-center text-[9px] font-normal uppercase leading-tight text-slate-600"
+                      >
+                        {label}
+                      </p>
+                    ))}
                   </div>
-                  <div className="grid grid-cols-5 gap-x-1">
+                  <div
+                    className={`grid gap-x-1 ${showMauActivePctAndEnabled ? "grid-cols-5" : "grid-cols-3"}`}
+                  >
                     <p className="text-center font-bold tabular-nums">
                       {mau.active.toLocaleString()}
                     </p>
-                    <p className="text-center font-bold tabular-nums">
-                      {mau.pct == null ? "—" : `${mau.pct}%`}
-                    </p>
+                    {showMauActivePctAndEnabled ? (
+                      <p className="text-center font-bold tabular-nums">
+                        {mau.pct == null ? "—" : `${mau.pct}%`}
+                      </p>
+                    ) : null}
                     <p className="text-center font-bold tabular-nums">
                       {mau.repeat.toLocaleString()}
                     </p>
                     <p className="text-center font-bold tabular-nums">
                       {mau.repeatPct == null ? "—" : `${mau.repeatPct}%`}
                     </p>
-                    <p className="text-center font-bold tabular-nums">
-                      {mau.registered.toLocaleString()}
-                    </p>
+                    {showMauActivePctAndEnabled ? (
+                      <p className="text-center font-bold tabular-nums">
+                        {mau.registered.toLocaleString()}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 <AreaTrend points={mauSixMonthTrendPoints} />
@@ -1223,13 +1228,14 @@ export function WellbeingDashboard({
             <div className="flex min-h-0 min-w-0 flex-col gap-3" data-export-mid-col>
               <Panel label="RISKS" className="flex-1">
                 <ZoneMeterGroup
+                  pctCaption="% of Higher Risk users (score >7)"
                   avgMarkers={[
                     { at: avgScoreBarPct(4), color: "#16a34a", label: "4" },
                     { at: avgScoreBarPct(7), color: "#dc2626", label: "7" },
                   ]}
                   avgZones={[
                     { label: "Ideal", color: "#16a34a" },
-                    { label: "Cautiously Neutral", color: "#eab308" },
+                    { label: "Cautiously Neutral", color: "#a16207" },
                     { label: "Needs Attention", color: "#dc2626" },
                   ]}
                   items={[
@@ -1251,11 +1257,11 @@ export function WellbeingDashboard({
                     },
                   ]}
                   markers={[
-                    { at: 33.3, color: "#eab308", label: "33.3" },
-                    { at: 66.6, color: "#dc2626", label: "66.6" },
+                    { at: 33.3, color: "#a16207", label: "33.3%" },
+                    { at: 66.6, color: "#dc2626", label: "66.6%" },
                   ]}
                   zones={[
-                    { label: "Caution", color: "#eab308" },
+                    { label: "Caution", color: "#a16207" },
                     { label: "Urgent", color: "#f87171" },
                     { label: "Crisis", color: "#dc2626" },
                   ]}
@@ -1264,13 +1270,14 @@ export function WellbeingDashboard({
 
               <Panel label="DRIVERS" className="flex-1">
                 <ZoneMeterGroup
+                  pctCaption="% of More Driven users (score >7)"
                   avgMarkers={[
                     { at: avgScoreBarPct(4), color: "#dc2626", label: "4" },
                     { at: avgScoreBarPct(7), color: "#16a34a", label: "7" },
                   ]}
                   avgZones={[
                     { label: "Needs Attention", color: "#dc2626" },
-                    { label: "Cautiously Neutral", color: "#eab308" },
+                    { label: "Cautiously Neutral", color: "#a16207" },
                     { label: "Ideal", color: "#16a34a" },
                   ]}
                   items={[
@@ -1293,80 +1300,66 @@ export function WellbeingDashboard({
                     },
                   ]}
                   markers={[
-                    { at: 33.3, color: "#eab308", label: "33.3" },
-                    { at: 66.6, color: "#16a34a", label: "66.6" },
+                    { at: 33.3, color: "#a16207", label: "33.3%" },
+                    { at: 66.6, color: "#16a34a", label: "66.6%" },
                   ]}
                   zones={[
-                    { label: "Concern", color: "#eab308" },
-                    { label: "Positive", color: "#22c55e" },
+                    { label: "Concern", color: "#a16207" },
+                    { label: "Positive", color: "#65a30d" },
                     { label: "Excellent", color: "#16a34a" },
                   ]}
                 />
               </Panel>
 
-              <div className="grid shrink-0 grid-cols-2 gap-3">
-                <Panel label="Effectiveness" className="min-h-[6.75rem]" exportAttr="effectiveness">
-                  <div className="flex h-full flex-col justify-center space-y-2">
-                    <p className="text-center text-[11px] font-semibold text-slate-800">
-                      {effectiveness.pct == null ? "—" : `${effectiveness.pct}%`}
-                    </p>
-                    <div className="flex h-3 overflow-hidden rounded-sm bg-slate-100">
-                      {effectiveness.pct != null ? (
-                        <>
-                          <div
-                            className="h-full transition-all"
-                            style={{
-                              width: `${effectiveness.pct}%`,
-                              background: "#059669",
-                            }}
-                            title={`Helpful: ${effectiveness.helpful.toLocaleString()}`}
-                          />
-                          <div
-                            className="h-full transition-all"
-                            style={{
-                              width: `${100 - effectiveness.pct}%`,
-                              background: "#f87171",
-                            }}
-                            title={`Not Helpful: ${effectiveness.notHelpful.toLocaleString()}`}
-                          />
-                        </>
-                      ) : null}
-                    </div>
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
-                      <span className="inline-flex items-center gap-1">
-                        <span className="h-2 w-2 rounded-sm" style={{ background: "#059669" }} />
-                        Helpful{" "}
-                        <span className="font-semibold text-slate-700">
-                          {effectiveness.helpful.toLocaleString()}
-                        </span>
-                      </span>
-                      <span className="inline-flex items-center gap-1">
-                        <span className="h-2 w-2 rounded-sm" style={{ background: "#f87171" }} />
-                        Not Helpful{" "}
-                        <span className="font-semibold text-slate-700">
-                          {effectiveness.notHelpful.toLocaleString()}
-                        </span>
-                      </span>
-                    </div>
+              <Panel
+                label="Effectiveness"
+                className="min-h-[6.75rem] shrink-0"
+                exportAttr="effectiveness"
+              >
+                <div className="flex h-full flex-col justify-center space-y-2">
+                  <p className="text-center text-[11px] font-semibold text-slate-800">
+                    {effectiveness.pct == null ? "—" : `${effectiveness.pct}%`}
+                  </p>
+                  <div className="flex h-3 overflow-hidden rounded-sm bg-slate-100">
+                    {effectiveness.pct != null ? (
+                      <>
+                        <div
+                          className="h-full transition-all"
+                          style={{
+                            width: `${effectiveness.pct}%`,
+                            background: "#16A34A",
+                          }}
+                          title={`Helpful: ${effectiveness.helpful.toLocaleString()}`}
+                        />
+                        <div
+                          className="h-full transition-all"
+                          style={{
+                            width: `${100 - effectiveness.pct}%`,
+                            background: "#f87171",
+                          }}
+                          title={`Not Helpful: ${effectiveness.notHelpful.toLocaleString()}`}
+                        />
+                      </>
+                    ) : null}
                   </div>
-                </Panel>
-
-                <Panel label="Star Rating" className="min-h-[6.75rem]" exportAttr="star-rating">
-                  <div className="flex h-full flex-col justify-center space-y-2">
-                    <p className="text-center text-[11px] font-semibold tabular-nums text-slate-800">
-                      {starRatingAvg.avg == null ? "—" : starRatingAvg.avg.toFixed(1)}
-                    </p>
-                    <div className="flex items-center justify-center py-0.5">
-                      <StarRatingRow value={starRatingAvg.avg} />
-                    </div>
-                    <p className="text-center text-[10px] text-slate-500">
-                      {starRatingAvg.count > 0
-                        ? `${starRatingAvg.count.toLocaleString()} ratings`
-                        : "No ratings"}
-                    </p>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
+                    <span className="inline-flex items-center gap-1">
+                      <span className="h-2 w-2 rounded-sm" style={{ background: "#16A34A" }} />
+                      Helpful{" "}
+                      <span className="font-semibold text-slate-700">
+                        {effectiveness.helpful.toLocaleString()}
+                      </span>
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <span className="h-2 w-2 rounded-sm" style={{ background: "#f87171" }} />
+                      Not Helpful{" "}
+                      <span className="font-semibold text-slate-700">
+                        {effectiveness.notHelpful.toLocaleString()}
+                      </span>
+                    </span>
                   </div>
-                </Panel>
-              </div>
+                </div>
+              </Panel>
             </div>
 
             {/* Right: Top Features fills; Personalize same height band as Effectiveness */}
@@ -1426,7 +1419,7 @@ export function WellbeingDashboard({
                     style={{ background: "#e2e8f0" }}
                   >
                     <div
-                      className="absolute inset-y-0 left-0 flex min-w-[5.5rem] items-center px-2.5 transition-all"
+                      className="absolute inset-y-0 left-0 transition-all"
                       style={{
                         width: `${Math.max(
                           personalize.pct == null ? 0 : clamp(personalize.pct, 0, 100),
@@ -1434,14 +1427,13 @@ export function WellbeingDashboard({
                         )}%`,
                         background: FEATURE_BAR_COLOR,
                       }}
+                    />
+                    <span
+                      className="absolute left-2.5 top-1/2 z-10 -translate-y-1/2 whitespace-nowrap text-[10px] font-bold uppercase tracking-wide"
+                      style={{ color: FEATURE_BAR_TEXT }}
                     >
-                      <span
-                        className="truncate text-[10px] font-bold uppercase tracking-wide"
-                        style={{ color: FEATURE_BAR_TEXT }}
-                      >
-                        Personalize
-                      </span>
-                    </div>
+                      Personalize
+                    </span>
                     <span
                       className="absolute right-2 top-1/2 z-20 -translate-y-1/2 text-[11px] font-bold tabular-nums"
                       style={{ color: FEATURE_BAR_TEXT }}
@@ -1451,9 +1443,7 @@ export function WellbeingDashboard({
                         : `${personalize.pct}% · ${personalize.users.toLocaleString()}`}
                     </span>
                   </div>
-                  <p className="text-[10px] text-slate-500">
-                    Rolling 6 mo · users · % of active users
-                  </p>
+                  <p className="text-right text-[10px] text-slate-500">% of users - no. of users</p>
                 </div>
               </Panel>
             </div>
