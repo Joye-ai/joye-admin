@@ -5,6 +5,7 @@ import { jsPDF } from "jspdf";
 import {
   Fragment,
   useCallback,
+  useEffect,
   useId,
   useMemo,
   useRef,
@@ -14,6 +15,148 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui";
+
+function isEmptyHighlightsHtml(html: string) {
+  return !html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+type HighlightsColumnCount = 1 | 2 | 3;
+
+const HIGHLIGHTS_COLUMNS_ATTR = "data-highlights-columns";
+
+function unwrapHighlightsColumns(html: string): {
+  html: string;
+  columns: HighlightsColumnCount;
+} {
+  if (typeof window === "undefined" || !html.trim()) {
+    return { html, columns: 1 };
+  }
+  const template = document.createElement("template");
+  template.innerHTML = html.trim();
+  const root = template.content.firstElementChild;
+  if (
+    root instanceof HTMLElement &&
+    template.content.childElementCount === 1 &&
+    root.hasAttribute(HIGHLIGHTS_COLUMNS_ATTR)
+  ) {
+    const raw = Number(root.getAttribute(HIGHLIGHTS_COLUMNS_ATTR));
+    const columns: HighlightsColumnCount = raw === 2 || raw === 3 ? raw : 1;
+    return { html: root.innerHTML, columns };
+  }
+  return { html, columns: 1 };
+}
+
+function wrapHighlightsColumns(html: string, columns: HighlightsColumnCount): string {
+  const { html: inner } = unwrapHighlightsColumns(html);
+  if (columns === 1) return inner;
+  return `<div ${HIGHLIGHTS_COLUMNS_ATTR}="${columns}" style="column-count:${columns};column-gap:1.25rem;column-fill:balance;">${inner}</div>`;
+}
+
+function runHighlightsFormat(command: string, value?: string) {
+  document.execCommand(command, false, value);
+}
+
+/** Wrap the current selection in a span with inline styles (font size, line-height, etc.). */
+function applyHighlightsInlineStyle(styles: Partial<CSSStyleDeclaration>) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+  const range = selection.getRangeAt(0);
+  const span = document.createElement("span");
+  Object.assign(span.style, styles);
+  try {
+    range.surroundContents(span);
+  } catch {
+    const fragment = range.extractContents();
+    span.appendChild(fragment);
+    range.insertNode(span);
+  }
+  selection.removeAllRanges();
+  const next = document.createRange();
+  next.selectNodeContents(span);
+  selection.addRange(next);
+}
+
+const HIGHLIGHTS_FORMAT_ACTIONS: Array<{
+  label: string;
+  title: string;
+  run: () => void;
+}> = [
+  { label: "B", title: "Bold", run: () => runHighlightsFormat("bold") },
+  { label: "I", title: "Italic", run: () => runHighlightsFormat("italic") },
+  { label: "U", title: "Underline", run: () => runHighlightsFormat("underline") },
+  {
+    label: "H",
+    title: "Heading",
+    run: () => runHighlightsFormat("formatBlock", "h3"),
+  },
+  {
+    label: "P",
+    title: "Normal paragraph",
+    run: () => runHighlightsFormat("formatBlock", "p"),
+  },
+  {
+    label: "• List",
+    title: "Bullet list",
+    run: () => runHighlightsFormat("insertUnorderedList"),
+  },
+  {
+    label: "1. List",
+    title: "Numbered list",
+    run: () => runHighlightsFormat("insertOrderedList"),
+  },
+  {
+    label: "⟸",
+    title: "Align left",
+    run: () => runHighlightsFormat("justifyLeft"),
+  },
+  {
+    label: "≡",
+    title: "Align center",
+    run: () => runHighlightsFormat("justifyCenter"),
+  },
+  {
+    label: "⟹",
+    title: "Align right",
+    run: () => runHighlightsFormat("justifyRight"),
+  },
+];
+
+const HIGHLIGHTS_FONT_SIZES = [
+  { label: "12", value: "12px" },
+  { label: "14", value: "14px" },
+  { label: "16", value: "16px" },
+  { label: "18", value: "18px" },
+  { label: "20", value: "20px" },
+  { label: "24", value: "24px" },
+];
+
+const HIGHLIGHTS_LINE_HEIGHTS = [
+  { label: "1", value: "1" },
+  { label: "1.2", value: "1.2" },
+  { label: "1.5", value: "1.5" },
+  { label: "1.8", value: "1.8" },
+  { label: "2", value: "2" },
+];
+
+const HIGHLIGHTS_COLUMN_OPTIONS: Array<{
+  cols: HighlightsColumnCount;
+  label: string;
+  title: string;
+}> = [
+  { cols: 1, label: "1", title: "1 column width" },
+  { cols: 2, label: "2", title: "2 column width" },
+  { cols: 3, label: "3", title: "3 column width" },
+];
+
+const HIGHLIGHTS_CONTENT_CLASS =
+  "text-sm leading-relaxed text-slate-700 [&_h3]:mb-1.5 [&_h3]:break-inside-avoid [&_h3]:text-base [&_h3]:font-semibold [&_h3]:text-slate-800 [&_li]:break-inside-avoid [&_ol]:my-1.5 [&_ol]:break-inside-avoid [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-1.5 [&_p]:break-inside-avoid [&_ul]:my-1.5 [&_ul]:break-inside-avoid [&_ul]:list-disc [&_ul]:pl-5";
+
+const HIGHLIGHTS_TOOLBAR_SELECT_CLASS =
+  "h-7 rounded border border-slate-200 bg-white px-1.5 text-[11px] font-medium text-slate-700 outline-none hover:bg-sky-50";
 
 const MONTH_SHORT = [
   "Jan",
@@ -34,6 +177,8 @@ export type DashboardWellbeingRow = {
   month: number;
   year: number;
   wellbeingIndex: number | null;
+  /** Brew + gratitude + MM counts — used to weight WI across orgs/months. */
+  totalCount?: number | null;
   helpful: number | null;
   notHelpful: number | null;
   effectiveness: number | null;
@@ -93,7 +238,10 @@ type Props = {
   wellbeingRows: DashboardWellbeingRow[];
   categoryRows: DashboardCategoryRow[];
   featureRows: DashboardFeatureRow[];
+  /** Lifetime / year-to-date org MAU (unfiltered). */
   orgSummaryRows: DashboardSummaryRow[];
+  /** Selected months + dept/location filters MAU. */
+  orgPeriodSummaryRows?: DashboardSummaryRow[];
   chatMonthlyRows?: DashboardChatMonthlyRow[];
   mauMonthlyRows?: DashboardMauMonthRow[];
 };
@@ -102,10 +250,7 @@ function formatMonthsTenure(year: number, months: number[]): string {
   const sorted = [...months].map(Number).sort((a, b) => a - b);
   if (!sorted.length) return String(year);
   const labels = sorted.map((m) => MONTH_SHORT[m - 1] || String(m));
-  const contiguous =
-    sorted.length > 1 && sorted.every((m, i) => i === 0 || m === sorted[i - 1] + 1);
   if (sorted.length === 1) return `${labels[0]} ${year}`;
-  if (contiguous) return `${labels[0]} – ${labels[labels.length - 1]} ${year}`;
   return `${labels.join(", ")} ${year}`;
 }
 
@@ -452,6 +597,8 @@ type ZoneMeterItem = {
 
 type ZoneMeterMarker = { at: number; color: string; label?: string };
 
+const INSUFFICIENT_DATA_LABEL = "Not sufficient data";
+
 function ZoneMeterBar({
   title,
   barPct,
@@ -460,6 +607,7 @@ function ZoneMeterBar({
   markers,
   minFill = 14,
   markerEdges = "both",
+  hasData = true,
 }: {
   title?: string;
   barPct: number;
@@ -469,12 +617,62 @@ function ZoneMeterBar({
   minFill?: number;
   /** Which scale ticks to draw: first row uses top, last row uses bottom. */
   markerEdges?: "top" | "bottom" | "both" | "none";
+  hasData?: boolean;
 }) {
   const onFill = barPct >= 88;
   const fillWidth = Math.max(barPct, barPct > 0 ? minFill : 0);
   const showTop = markerEdges === "top" || markerEdges === "both";
   const showBottom = markerEdges === "bottom" || markerEdges === "both";
   const hasMarkerLabels = showTop && markers.some((m) => m.label);
+
+  if (!hasData) {
+    return (
+      <div className={`relative isolate h-6 ${hasMarkerLabels ? "mt-5" : ""}`}>
+        <div
+          className="absolute inset-0 z-0 flex items-center justify-center overflow-hidden rounded-md px-2"
+          style={{ background: "#e2e8f0" }}
+        >
+          {title ? (
+            <span className="absolute left-2 truncate text-[9px] font-bold uppercase tracking-wide text-slate-500">
+              {title}
+            </span>
+          ) : null}
+          <span className="text-center text-[9px] font-medium italic text-slate-500">
+            {INSUFFICIENT_DATA_LABEL}
+          </span>
+        </div>
+        {markers.length > 0 && markerEdges !== "none" ? (
+          <div className="pointer-events-none absolute inset-0 z-[5]" aria-hidden>
+            {markers.map((m) => (
+              <Fragment key={`${m.at}-${m.color}`}>
+                {showTop && m.label ? (
+                  <span
+                    className="absolute bottom-full mb-2.5 -translate-x-1/2 text-[9px] font-normal tabular-nums leading-none"
+                    style={{ left: `${m.at}%`, color: m.color }}
+                  >
+                    {m.label}
+                  </span>
+                ) : null}
+                {showTop ? (
+                  <div
+                    className="absolute bottom-full h-1.5 w-0.5 opacity-55"
+                    style={{ left: `${m.at}%`, background: m.color }}
+                  />
+                ) : null}
+                {showBottom ? (
+                  <div
+                    className="absolute top-full h-1.5 w-0.5 opacity-55"
+                    style={{ left: `${m.at}%`, background: m.color }}
+                  />
+                ) : null}
+              </Fragment>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className={`relative isolate h-6 ${hasMarkerLabels ? "mt-5" : ""}`}>
       {/* Track + fill clipped to the rounded bar */}
@@ -592,6 +790,7 @@ function ZoneMeterGroup({
                   markerEdges={markerEdges}
                   valueLabel={item.avgScore == null ? "—" : item.avgScore.toFixed(1)}
                   minFill={item.avgScore == null ? 0 : 28}
+                  hasData={item.avgScore != null}
                 />
                 <ZoneMeterBar
                   barPct={usersPct}
@@ -602,6 +801,7 @@ function ZoneMeterGroup({
                     item.pctAtOrAbove7 == null ? "—" : `${Math.round(item.pctAtOrAbove7)}%`
                   }
                   minFill={item.pctAtOrAbove7 == null ? 0 : 22}
+                  hasData={item.pctAtOrAbove7 != null}
                 />
               </div>
               {item.description ? (
@@ -672,6 +872,7 @@ export function WellbeingDashboard({
   categoryRows,
   featureRows,
   orgSummaryRows,
+  orgPeriodSummaryRows = [],
   chatMonthlyRows = [],
   mauMonthlyRows = [],
 }: Props) {
@@ -679,6 +880,10 @@ export function WellbeingDashboard({
   const [exportingDashboard, setExportingDashboard] = useState(false);
   const [chartType, setChartType] = useState<DashboardChartType>("type1");
   const showMauActivePctAndEnabled = chartType === "type1";
+  const [highlightsHtml, setHighlightsHtml] = useState("");
+  const [highlightsEditing, setHighlightsEditing] = useState(false);
+  const [highlightsColumns, setHighlightsColumns] = useState<HighlightsColumnCount>(1);
+  const highlightsEditorRef = useRef<HTMLDivElement>(null);
 
   const selectedMonths = useMemo(() => [...months].map(Number).sort((a, b) => a - b), [months]);
 
@@ -686,25 +891,61 @@ export function WellbeingDashboard({
   const selectedMonth = selectedMonths[selectedMonths.length - 1] || null;
 
   const monthsTenure = useMemo(() => {
-    if (selectedMonth == null) return String(year);
-    return formatMonthsTenure(year, [selectedMonth]);
-  }, [year, selectedMonth]);
+    if (!selectedMonths.length) return String(year);
+    return formatMonthsTenure(year, selectedMonths);
+  }, [year, selectedMonths]);
 
-  const wellbeingByYearMonth = useMemo(() => {
-    const map = new Map<string, number[]>();
-    for (const row of wellbeingRows) {
-      if (row.wellbeingIndex == null) continue;
-      const key = `${row.year}-${row.month}`;
-      const list = map.get(key) || [];
-      list.push(row.wellbeingIndex);
-      map.set(key, list);
+  const openHighlightsEditor = () => {
+    const { columns } = unwrapHighlightsColumns(highlightsHtml);
+    setHighlightsColumns(columns);
+    setHighlightsEditing(true);
+  };
+
+  useEffect(() => {
+    if (!highlightsEditing) return;
+    const el = highlightsEditorRef.current;
+    if (!el) return;
+    const { html } = unwrapHighlightsColumns(highlightsHtml);
+    el.innerHTML = html || "";
+    el.focus();
+    // Only seed the editor when entering edit mode.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: seed once per edit session
+  }, [highlightsEditing]);
+
+  const saveHighlights = () => {
+    const raw = highlightsEditorRef.current?.innerHTML || "";
+    if (isEmptyHighlightsHtml(raw)) {
+      setHighlightsHtml("");
+      setHighlightsColumns(1);
+      setHighlightsEditing(false);
+      return;
     }
-    return map;
-  }, [wellbeingRows]);
+    setHighlightsHtml(wrapHighlightsColumns(raw, highlightsColumns));
+    setHighlightsEditing(false);
+  };
 
+  const cancelHighlightsEdit = () => {
+    setHighlightsEditing(false);
+  };
+
+  /**
+   * Count-weighted WI for a calendar month (matches backend:
+   * wellbeingIndex already uses brew+gratitude+MM sums / totalCount per org row).
+   */
   const valueFor = useCallback(
-    (y: number, m: number) => avg(wellbeingByYearMonth.get(`${y}-${m}`) || []),
-    [wellbeingByYearMonth],
+    (y: number, m: number) => {
+      let weighted = 0;
+      let weight = 0;
+      for (const row of wellbeingRows) {
+        if (row.year !== y || row.month !== m || row.wellbeingIndex == null) continue;
+        const w = row.totalCount != null && row.totalCount > 0 ? row.totalCount : 1;
+        weighted += row.wellbeingIndex * w;
+        weight += w;
+      }
+      if (weight <= 0) return null;
+      return Number((weighted / weight).toFixed(1));
+    },
+    [wellbeingRows],
   );
 
   /** 6-month chart: selected month + 5 prior months. */
@@ -730,23 +971,33 @@ export function WellbeingDashboard({
     }));
   }, [year, selectedMonth, mauMonthlyRows]);
 
+  /** Latest selected month (rightmost month in the filter). */
   const latestWellbeing = selectedMonth == null ? null : valueFor(year, selectedMonth);
 
-  const threeMonthAvg = useMemo(() => {
-    if (selectedMonth == null) return null;
-    const vals: number[] = [];
-    for (const slot of monthsEndingAt(year, selectedMonth, 3)) {
-      const a = valueFor(slot.year, slot.month);
-      if (a != null) vals.push(a);
+  /**
+   * Period WI: count-weighted across all selected months (and orgs), not a plain
+   * average of monthly averages — so a busy month outweighs a sparse one.
+   */
+  const periodWellbeingAvg = useMemo(() => {
+    if (!selectedMonths.length) return null;
+    const selected = new Set(selectedMonths);
+    let weighted = 0;
+    let weight = 0;
+    for (const row of wellbeingRows) {
+      if (row.year !== year || !selected.has(row.month) || row.wellbeingIndex == null) continue;
+      const w = row.totalCount != null && row.totalCount > 0 ? row.totalCount : 1;
+      weighted += row.wellbeingIndex * w;
+      weight += w;
     }
-    return avg(vals);
-  }, [year, selectedMonth, valueFor]);
+    if (weight <= 0) return null;
+    return Number((weighted / weight).toFixed(1));
+  }, [selectedMonths, year, wellbeingRows]);
 
-  const mau = useMemo(() => {
+  const sumMauFromRows = (rows: DashboardSummaryRow[]) => {
     let registered = 0;
     let active = 0;
     let repeat = 0;
-    for (const row of orgSummaryRows) {
+    for (const row of rows) {
       registered += row.summaryRow?.registeredUsers ?? 0;
       active += row.summaryRow?.activeUsers ?? 0;
       repeat += row.summaryRow?.repeatUsers ?? 0;
@@ -754,7 +1005,16 @@ export function WellbeingDashboard({
     const pct = registered > 0 ? Math.round((active / registered) * 100) : null;
     const repeatPct = active > 0 ? Math.round((repeat / active) * 100) : null;
     return { registered, active, repeat, pct, repeatPct };
-  }, [orgSummaryRows]);
+  };
+
+  /** Lifetime / year-to-date MAU (unfiltered org summary). */
+  const mau = useMemo(() => sumMauFromRows(orgSummaryRows), [orgSummaryRows]);
+
+  /** Selected months + department/location filters. */
+  const selectedPeriodMau = useMemo(
+    () => sumMauFromRows(orgPeriodSummaryRows.length ? orgPeriodSummaryRows : orgSummaryRows),
+    [orgPeriodSummaryRows, orgSummaryRows],
+  );
 
   const categoryScores = useMemo(() => {
     const pick = (key: string) => {
@@ -941,7 +1201,7 @@ export function WellbeingDashboard({
 
       // PDF-only layout:
       // - MAU + Top Features bottoms align with Effectiveness (middle stack height)
-      // - Highlights + Recommendations grow to fill remaining 16:9 height
+      // - Highlights grows to fill remaining 16:9 height
       const restoreChildren: Array<{ el: HTMLElement; cssText: string }> = [];
       const remember = (el: HTMLElement) => {
         restoreChildren.push({ el, cssText: el.style.cssText });
@@ -1122,7 +1382,7 @@ export function WellbeingDashboard({
         <div ref={dashboardExportRef} className="min-w-[1400px] space-y-3 bg-slate-50/80 p-3">
           <div className="relative rounded-md border border-sky-300/80 bg-gradient-to-r from-sky-50 to-white px-4 py-3 text-center">
             <p className="mb-1.5 text-sm font-semibold text-slate-800">Joye Insights</p>
-            <p className="text-xs text-slate-500">{monthsTenure}</p>
+            <p className="text-xs text-slate-500">Period: {monthsTenure}</p>
             <div
               className="absolute right-3 top-3 flex items-center gap-2"
               data-export-ignore="true"
@@ -1166,7 +1426,7 @@ export function WellbeingDashboard({
                 <div className="relative mb-1 pr-5">
                   <div className="flex items-start justify-center gap-10">
                     <SemiGauge value={latestWellbeing} caption={latestLabel} />
-                    <SemiGauge value={threeMonthAvg} caption="3-months" />
+                    <SemiGauge value={periodWellbeingAvg} caption="Period" />
                   </div>
                   <AreaTrend points={sixMonthTrendPoints} valueDomain="wellbeing" />
                   <p className="absolute right-0 top-1/2 -translate-y-1/2 rotate-180 text-[9px] font-medium tracking-wide text-emerald-800 [writing-mode:vertical-rl]">
@@ -1200,28 +1460,64 @@ export function WellbeingDashboard({
                       </p>
                     ))}
                   </div>
-                  <div
-                    className={`grid gap-x-1 ${showMauActivePctAndEnabled ? "grid-cols-5" : "grid-cols-3"}`}
-                  >
-                    <p className="text-center font-bold tabular-nums">
-                      {mau.active.toLocaleString()}
+                  <div className="relative pl-3">
+                    <p className="absolute left-0 top-1/2 -translate-y-1/2 rotate-180 text-[8px] font-medium tracking-wide text-slate-500 [writing-mode:vertical-rl]">
+                      Lifetime
                     </p>
-                    {showMauActivePctAndEnabled ? (
+                    <div
+                      className={`grid gap-x-1 ${showMauActivePctAndEnabled ? "grid-cols-5" : "grid-cols-3"}`}
+                    >
                       <p className="text-center font-bold tabular-nums">
-                        {mau.pct == null ? "—" : `${mau.pct}%`}
+                        {mau.active.toLocaleString()}
                       </p>
-                    ) : null}
-                    <p className="text-center font-bold tabular-nums">
-                      {mau.repeat.toLocaleString()}
-                    </p>
-                    <p className="text-center font-bold tabular-nums">
-                      {mau.repeatPct == null ? "—" : `${mau.repeatPct}%`}
-                    </p>
-                    {showMauActivePctAndEnabled ? (
+                      {showMauActivePctAndEnabled ? (
+                        <p className="text-center font-bold tabular-nums">
+                          {mau.pct == null ? "—" : `${mau.pct}%`}
+                        </p>
+                      ) : null}
                       <p className="text-center font-bold tabular-nums">
-                        {mau.registered.toLocaleString()}
+                        {mau.repeat.toLocaleString()}
                       </p>
-                    ) : null}
+                      <p className="text-center font-bold tabular-nums">
+                        {mau.repeatPct == null ? "—" : `${mau.repeatPct}%`}
+                      </p>
+                      {showMauActivePctAndEnabled ? (
+                        <p className="text-center font-bold tabular-nums">
+                          {mau.registered.toLocaleString()}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  {/* Selected months period stats */}
+                  <div className="relative mt-2.5 border-t border-slate-100 pt-2.5 pl-3">
+                    <p className="absolute left-0 top-1/2 -translate-y-1/2 rotate-180 text-[8px] font-medium tracking-wide text-slate-500 [writing-mode:vertical-rl]">
+                      Period
+                    </p>
+                    <div
+                      className={`grid gap-x-1 ${showMauActivePctAndEnabled ? "grid-cols-5" : "grid-cols-3"}`}
+                    >
+                      <p className="text-center font-bold tabular-nums">
+                        {selectedPeriodMau.active.toLocaleString()}
+                      </p>
+                      {showMauActivePctAndEnabled ? (
+                        <p className="text-center font-bold tabular-nums">
+                          {selectedPeriodMau.pct == null ? "—" : `${selectedPeriodMau.pct}%`}
+                        </p>
+                      ) : null}
+                      <p className="text-center font-bold tabular-nums">
+                        {selectedPeriodMau.repeat.toLocaleString()}
+                      </p>
+                      <p className="text-center font-bold tabular-nums">
+                        {selectedPeriodMau.repeatPct == null
+                          ? "—"
+                          : `${selectedPeriodMau.repeatPct}%`}
+                      </p>
+                      {showMauActivePctAndEnabled ? (
+                        <p className="text-center font-bold tabular-nums">
+                          {selectedPeriodMau.registered.toLocaleString()}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
                 <AreaTrend points={mauSixMonthTrendPoints} />
@@ -1321,12 +1617,18 @@ export function WellbeingDashboard({
                 exportAttr="effectiveness"
               >
                 <div className="flex h-full flex-col justify-center space-y-2">
-                  <p className="text-center text-[11px] font-semibold text-slate-800">
-                    {effectiveness.pct == null ? "—" : `${effectiveness.pct}%`}
-                  </p>
-                  <div className="flex h-3 overflow-hidden rounded-sm bg-slate-100">
-                    {effectiveness.pct != null ? (
-                      <>
+                  {effectiveness.pct == null ? (
+                    <div className="flex h-10 items-center justify-center rounded-md bg-slate-100 px-2">
+                      <p className="text-center text-[11px] font-medium italic text-slate-500">
+                        {INSUFFICIENT_DATA_LABEL}
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-center text-[11px] font-semibold text-slate-800">
+                        {`${effectiveness.pct}%`}
+                      </p>
+                      <div className="flex h-3 overflow-hidden rounded-sm bg-slate-100">
                         <div
                           className="h-full transition-all"
                           style={{
@@ -1343,25 +1645,25 @@ export function WellbeingDashboard({
                           }}
                           title={`Not Helpful: ${effectiveness.notHelpful.toLocaleString()}`}
                         />
-                      </>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
-                    <span className="inline-flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-sm" style={{ background: "#16A34A" }} />
-                      Helpful{" "}
-                      <span className="font-semibold text-slate-700">
-                        {effectiveness.helpful.toLocaleString()}
-                      </span>
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-sm" style={{ background: "#f87171" }} />
-                      Not Helpful{" "}
-                      <span className="font-semibold text-slate-700">
-                        {effectiveness.notHelpful.toLocaleString()}
-                      </span>
-                    </span>
-                  </div>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500">
+                        <span className="inline-flex items-center gap-1">
+                          <span className="h-2 w-2 rounded-sm" style={{ background: "#16A34A" }} />
+                          Helpful{" "}
+                          <span className="font-semibold text-slate-700">
+                            {effectiveness.helpful.toLocaleString()}
+                          </span>
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="h-2 w-2 rounded-sm" style={{ background: "#f87171" }} />
+                          Not Helpful{" "}
+                          <span className="font-semibold text-slate-700">
+                            {effectiveness.notHelpful.toLocaleString()}
+                          </span>
+                        </span>
+                      </div>
+                    </>
+                  )}
                 </div>
               </Panel>
             </div>
@@ -1418,48 +1720,260 @@ export function WellbeingDashboard({
                 exportAttr="personalize"
               >
                 <div className="flex h-full flex-col justify-center space-y-1.5">
-                  <div
-                    className="relative h-7 overflow-hidden rounded-md"
-                    style={{ background: "#e2e8f0" }}
-                  >
-                    <div
-                      className="absolute inset-y-0 left-0 transition-all"
-                      style={{
-                        width: `${Math.max(
-                          personalize.pct == null ? 0 : clamp(personalize.pct, 0, 100),
-                          personalize.pct == null ? 0 : 18,
-                        )}%`,
-                        background: FEATURE_BAR_COLOR,
-                      }}
-                    />
-                    <span
-                      className="absolute left-2.5 top-1/2 z-10 -translate-y-1/2 whitespace-nowrap text-[10px] font-bold uppercase tracking-wide"
-                      style={{ color: FEATURE_BAR_TEXT }}
-                    >
-                      Personalize
-                    </span>
-                    <span
-                      className="absolute right-2 top-1/2 z-20 -translate-y-1/2 text-[11px] font-bold tabular-nums"
-                      style={{ color: FEATURE_BAR_TEXT }}
-                    >
-                      {personalize.pct == null
-                        ? "—"
-                        : `${personalize.pct}% · ${personalize.users.toLocaleString()}`}
-                    </span>
-                  </div>
-                  <p className="text-right text-[10px] text-slate-500">% of users - no. of users</p>
+                  {personalize.pct == null ? (
+                    <div className="flex h-7 items-center justify-center rounded-md bg-slate-100 px-2">
+                      <p className="text-center text-[11px] font-medium italic text-slate-500">
+                        {INSUFFICIENT_DATA_LABEL}
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div
+                        className="relative h-7 overflow-hidden rounded-md"
+                        style={{ background: "#e2e8f0" }}
+                      >
+                        <div
+                          className="absolute inset-y-0 left-0 transition-all"
+                          style={{
+                            width: `${Math.max(clamp(personalize.pct, 0, 100), 18)}%`,
+                            background: FEATURE_BAR_COLOR,
+                          }}
+                        />
+                        <span
+                          className="absolute left-2.5 top-1/2 z-10 -translate-y-1/2 whitespace-nowrap text-[10px] font-bold uppercase tracking-wide"
+                          style={{ color: FEATURE_BAR_TEXT }}
+                        >
+                          Personalize
+                        </span>
+                        <span
+                          className="absolute right-2 top-1/2 z-20 -translate-y-1/2 text-[11px] font-bold tabular-nums"
+                          style={{ color: FEATURE_BAR_TEXT }}
+                        >
+                          {`${personalize.pct}% · ${personalize.users.toLocaleString()}`}
+                        </span>
+                      </div>
+                      <p className="text-right text-[10px] text-slate-500">
+                        % of users - no. of users
+                      </p>
+                    </>
+                  )}
                 </div>
               </Panel>
             </div>
           </div>
 
-          {/* Bottom row: Highlights + Recommendations */}
-          <div className="grid grid-cols-2 gap-3" data-export-bottom-row>
-            <Panel label="Highlights" className="min-h-[7rem]" exportAttr="bottom-panel">
-              <p className="py-8 text-center text-xs text-slate-400">Highlights coming soon</p>
-            </Panel>
-            <Panel label="Recommendations" className="min-h-[7rem]" exportAttr="bottom-panel">
-              <p className="py-8 text-center text-xs text-slate-400">Recommendations coming soon</p>
+          {/* Bottom: Highlights — view by default; editor opens inline on Edit */}
+          <div data-export-bottom-row>
+            <Panel
+              label="Highlights"
+              className="min-h-[7rem]"
+              exportAttr="bottom-panel"
+              headerAction={
+                !highlightsEditing ? (
+                  <div data-export-ignore="true">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={openHighlightsEditor}
+                      className="!h-7 !px-2 !text-[10px]"
+                    >
+                      Edit
+                    </Button>
+                  </div>
+                ) : null
+              }
+            >
+              {highlightsEditing ? (
+                <div className="flex h-full min-h-0 flex-col gap-2">
+                  <div
+                    className="flex flex-wrap items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 p-1.5"
+                    data-export-ignore="true"
+                  >
+                    {HIGHLIGHTS_FORMAT_ACTIONS.map((action) => (
+                      <button
+                        key={action.title}
+                        type="button"
+                        title={action.title}
+                        className={`rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-sky-50 ${
+                          action.label === "B"
+                            ? "font-bold"
+                            : action.label === "I"
+                              ? "italic"
+                              : action.label === "U"
+                                ? "underline"
+                                : ""
+                        }`}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          highlightsEditorRef.current?.focus();
+                          action.run();
+                        }}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                    <label className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-600">
+                      Color
+                      <input
+                        type="color"
+                        defaultValue="#334155"
+                        title="Font color"
+                        className="h-7 w-8 cursor-pointer rounded border border-slate-200 bg-white p-0.5"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onChange={(e) => {
+                          highlightsEditorRef.current?.focus();
+                          runHighlightsFormat("foreColor", e.target.value);
+                        }}
+                      />
+                    </label>
+                    <label className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-600">
+                      Highlight
+                      <input
+                        type="color"
+                        defaultValue="#fef08a"
+                        title="Highlight color"
+                        className="h-7 w-8 cursor-pointer rounded border border-slate-200 bg-white p-0.5"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onChange={(e) => {
+                          highlightsEditorRef.current?.focus();
+                          if (!document.execCommand("hiliteColor", false, e.target.value)) {
+                            runHighlightsFormat("backColor", e.target.value);
+                          }
+                        }}
+                      />
+                    </label>
+                    <label className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-600">
+                      Size
+                      <select
+                        className={HIGHLIGHTS_TOOLBAR_SELECT_CLASS}
+                        defaultValue=""
+                        title="Font size"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (!value) return;
+                          highlightsEditorRef.current?.focus();
+                          applyHighlightsInlineStyle({ fontSize: value });
+                          e.target.value = "";
+                        }}
+                      >
+                        <option value="" disabled>
+                          Size
+                        </option>
+                        {HIGHLIGHTS_FONT_SIZES.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}px
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-600">
+                      Line
+                      <select
+                        className={HIGHLIGHTS_TOOLBAR_SELECT_CLASS}
+                        defaultValue=""
+                        title="Line height"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          if (!value) return;
+                          highlightsEditorRef.current?.focus();
+                          applyHighlightsInlineStyle({ lineHeight: value });
+                          e.target.value = "";
+                        }}
+                      >
+                        <option value="" disabled>
+                          Line height
+                        </option>
+                        {HIGHLIGHTS_LINE_HEIGHTS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="ml-0.5 inline-flex items-center gap-1 border-l border-slate-200 pl-2">
+                      <span className="text-[10px] font-medium text-slate-600">Cols</span>
+                      {HIGHLIGHTS_COLUMN_OPTIONS.map((option) => (
+                        <button
+                          key={option.cols}
+                          type="button"
+                          title={option.title}
+                          aria-pressed={highlightsColumns === option.cols}
+                          className={`min-w-7 rounded border px-2 py-1 text-[11px] font-semibold ${
+                            highlightsColumns === option.cols
+                              ? "border-sky-400 bg-sky-100 text-sky-800"
+                              : "border-slate-200 bg-white text-slate-700 hover:bg-sky-50"
+                          }`}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            highlightsEditorRef.current?.focus();
+                            setHighlightsColumns(option.cols);
+                          }}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div
+                    ref={highlightsEditorRef}
+                    contentEditable
+                    suppressContentEditableWarning
+                    role="textbox"
+                    aria-multiline="true"
+                    aria-label="Highlights editor"
+                    className={`min-h-[8rem] flex-1 overflow-y-auto rounded-md border border-slate-200 px-3 py-2 text-slate-800 outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-200 empty:before:pointer-events-none empty:before:text-slate-400 empty:before:content-[attr(data-placeholder)] ${HIGHLIGHTS_CONTENT_CLASS}`}
+                    style={
+                      highlightsColumns > 1
+                        ? {
+                            columnCount: highlightsColumns,
+                            columnGap: "1.25rem",
+                            columnFill: "balance",
+                          }
+                        : undefined
+                    }
+                    data-placeholder="Write highlights for this report…"
+                  />
+                  <div
+                    className="flex items-center justify-between gap-2"
+                    data-export-ignore="true"
+                  >
+                    <p className="text-[10px] text-slate-400">
+                      Session only — included in PDF export, not saved to the database.
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={cancelHighlightsEdit}
+                        className="!h-7 !px-2 !text-[10px]"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={saveHighlights}
+                        className="!h-7 !px-2 !text-[10px]"
+                      >
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : highlightsHtml ? (
+                <div
+                  className={`highlights-content ${HIGHLIGHTS_CONTENT_CLASS}`}
+                  dangerouslySetInnerHTML={{ __html: highlightsHtml }}
+                />
+              ) : (
+                <p className="py-8 text-center text-xs text-slate-400">
+                  No highlights yet. Press Edit to add notes for this view and export.
+                </p>
+              )}
             </Panel>
           </div>
         </div>
