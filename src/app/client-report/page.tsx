@@ -1363,82 +1363,10 @@ export default function WellbeingAnalyticsPage() {
         setFeatureUsageRows(mapFeatureUsageRecords(allFeatureUsageRecords));
         setChatMonthlyRows(mergeChatMonthlyRows(allChatMonthly));
 
-        // MAU is fetched sequentially AFTER core metrics so we do not overload admin-service
-        // (parallel live YTD + period + 6-month chart was timing out → zeros).
+        // MAU: Period + Lifetime in parallel (mauLite is light enough). Chart is 1 request per
+        // lookback year (all months in that year) instead of 6 sequential month calls.
         const periodWeeks = isoWeeksForMonths(yearNum, selectedMonths);
         const lifetimeWeeks = isoWeeksForMonths(yearNum, lifetimeMonths);
-
-        if (periodWeeks.length > 0) {
-          try {
-            const periodOrgResponse = await post<OrganizationAnalyticsResponse>(
-              "/admin/organization-analytics",
-              {
-                platformKey: platform,
-                tIds,
-                year: yearNum,
-                weeks: periodWeeks,
-                includeSummary: true,
-                trigger: false,
-                mauLite: true,
-                summaryOnly: true,
-                ...attributeFilters,
-              },
-            );
-            if (requestId !== requestRef.current) return;
-            allOrgPeriodSummary.push(...mapOrgSummaryResults(periodOrgResponse, batch));
-            setOrgPeriodSummaryRows(
-              [...allOrgPeriodSummary].sort((a, b) => a.orgName.localeCompare(b.orgName)),
-            );
-          } catch (err) {
-            console.error(`Period org analytics fetch failed for ${yearNum}:`, err);
-            setError(
-              err instanceof Error
-                ? `MAU Period failed: ${err.message}`
-                : "MAU Period failed to load",
-            );
-          }
-        }
-
-        if (lifetimeWeeks.length > 0) {
-          try {
-            const lifetimeOrgResponse = await post<OrganizationAnalyticsResponse>(
-              "/admin/organization-analytics",
-              {
-                platformKey: platform,
-                tIds,
-                year: yearNum,
-                weeks: lifetimeWeeks,
-                includeSummary: true,
-                trigger: false,
-                mauLite: true,
-                summaryOnly: true,
-              },
-            );
-            if (requestId !== requestRef.current) return;
-            const lifetimeRows = mapOrgSummaryResults(lifetimeOrgResponse, batch);
-            allOrgSummary.push(...lifetimeRows);
-            setOrgSummaryRows(
-              [...allOrgSummary].sort((a, b) => a.orgName.localeCompare(b.orgName)),
-            );
-          } catch (err) {
-            console.error(`Lifetime org analytics fetch failed for ${yearNum}:`, err);
-            setError(
-              err instanceof Error
-                ? `MAU Lifetime failed: ${err.message}`
-                : "MAU Lifetime failed to load",
-            );
-          }
-        }
-
-        // MAU trend: one calendar month per request (newest first), update chart after each chunk.
-        // Non-blocking so Load can finish while points keep appearing.
-        const chartMonthsDesc: Array<{ year: number; month: number }> = [];
-        for (const slot of wellbeingLookbackByYear) {
-          for (const month of [...slot.months].sort((a, b) => b - a)) {
-            chartMonthsDesc.push({ year: slot.year, month });
-          }
-        }
-        chartMonthsDesc.sort((a, b) => b.year - a.year || b.month - a.month);
         const chartBatch = batch;
         const chartTIds = tIds;
         const publishMauChart = () => {
@@ -1449,39 +1377,118 @@ export default function WellbeingAnalyticsPage() {
             }),
           );
         };
-        void (async () => {
-          for (const { year: chartYear, month: chartMonth } of chartMonthsDesc) {
-            if (requestId !== requestRef.current) return;
-            const weeksForMonth = isoWeeksForMonths(chartYear, [chartMonth]);
-            if (!weeksForMonth.length) continue;
-            try {
-              // Same mauLite + attribute filters as Period so monthly points match strip logic.
-              // Only absorb m{chartMonth} — weeks can spill into adjacent months.
-              const chartResponse = await post<OrganizationAnalyticsResponse>(
-                "/admin/organization-analytics",
-                {
-                  platformKey: platform,
-                  tIds: chartTIds,
-                  year: chartYear,
-                  weeks: weeksForMonth,
-                  months: [chartMonth],
-                  includeSummary: false,
-                  trigger: false,
-                  mauLite: true,
-                  summaryOnly: true,
-                  includeMonths: true,
-                  ...attributeFilters,
-                },
-              );
-              if (requestId !== requestRef.current) return;
-              for (const row of mapOrgSummaryResults(chartResponse, chartBatch)) {
-                absorbMauMonthActives(row.summaryRow, chartYear, chartMonth);
+
+        const mauStripTasks: Promise<void>[] = [];
+
+        if (periodWeeks.length > 0) {
+          mauStripTasks.push(
+            (async () => {
+              try {
+                const periodOrgResponse = await post<OrganizationAnalyticsResponse>(
+                  "/admin/organization-analytics",
+                  {
+                    platformKey: platform,
+                    tIds,
+                    year: yearNum,
+                    weeks: periodWeeks,
+                    includeSummary: true,
+                    trigger: false,
+                    mauLite: true,
+                    summaryOnly: true,
+                    ...attributeFilters,
+                  },
+                );
+                if (requestId !== requestRef.current) return;
+                allOrgPeriodSummary.push(...mapOrgSummaryResults(periodOrgResponse, batch));
+                setOrgPeriodSummaryRows(
+                  [...allOrgPeriodSummary].sort((a, b) => a.orgName.localeCompare(b.orgName)),
+                );
+              } catch (err) {
+                console.error(`Period org analytics fetch failed for ${yearNum}:`, err);
+                setError(
+                  err instanceof Error
+                    ? `MAU Period failed: ${err.message}`
+                    : "MAU Period failed to load",
+                );
               }
-              publishMauChart();
-            } catch (err) {
-              console.error(`MAU chart chunk failed for ${chartYear}-${chartMonth}:`, err);
-            }
-          }
+            })(),
+          );
+        }
+
+        if (lifetimeWeeks.length > 0) {
+          mauStripTasks.push(
+            (async () => {
+              try {
+                const lifetimeOrgResponse = await post<OrganizationAnalyticsResponse>(
+                  "/admin/organization-analytics",
+                  {
+                    platformKey: platform,
+                    tIds,
+                    year: yearNum,
+                    weeks: lifetimeWeeks,
+                    includeSummary: true,
+                    trigger: false,
+                    mauLite: true,
+                    summaryOnly: true,
+                  },
+                );
+                if (requestId !== requestRef.current) return;
+                allOrgSummary.push(...mapOrgSummaryResults(lifetimeOrgResponse, batch));
+                setOrgSummaryRows(
+                  [...allOrgSummary].sort((a, b) => a.orgName.localeCompare(b.orgName)),
+                );
+              } catch (err) {
+                console.error(`Lifetime org analytics fetch failed for ${yearNum}:`, err);
+                setError(
+                  err instanceof Error
+                    ? `MAU Lifetime failed: ${err.message}`
+                    : "MAU Lifetime failed to load",
+                );
+              }
+            })(),
+          );
+        }
+
+        await Promise.all(mauStripTasks);
+        if (requestId !== requestRef.current) return;
+
+        // Non-blocking chart: one mauLite includeMonths call per lookback year.
+        void (async () => {
+          await Promise.all(
+            wellbeingLookbackByYear.map(async (slot) => {
+              if (requestId !== requestRef.current) return;
+              const chartMonths = [...slot.months].sort((a, b) => a - b);
+              const weeksForMonths = isoWeeksForMonths(slot.year, chartMonths);
+              if (!weeksForMonths.length || !chartMonths.length) return;
+              try {
+                const chartResponse = await post<OrganizationAnalyticsResponse>(
+                  "/admin/organization-analytics",
+                  {
+                    platformKey: platform,
+                    tIds: chartTIds,
+                    year: slot.year,
+                    weeks: weeksForMonths,
+                    months: chartMonths,
+                    includeSummary: false,
+                    trigger: false,
+                    mauLite: true,
+                    summaryOnly: true,
+                    includeMonths: true,
+                    ...attributeFilters,
+                  },
+                );
+                if (requestId !== requestRef.current) return;
+                for (const row of mapOrgSummaryResults(chartResponse, chartBatch)) {
+                  for (const month of chartMonths) {
+                    absorbMauMonthActives(row.summaryRow, slot.year, month);
+                  }
+                }
+                publishMauChart();
+              } catch (err) {
+                console.error(`MAU chart failed for ${slot.year}:`, err);
+              }
+            }),
+          );
         })();
       }
 
