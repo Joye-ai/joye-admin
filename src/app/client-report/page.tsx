@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { EmotionalHealthExportButton } from "@/components/client-report/EmotionalHealthExportButton";
 import { WellbeingDashboard } from "@/components/client-report/WellbeingDashboard";
 import { Layout } from "@/components/layout";
 import {
@@ -18,6 +19,7 @@ import {
 import { ROUTES } from "@/constants";
 import { get, post } from "@/helpers/api";
 import { useAppSelector } from "@/store";
+import type { EmotionalHealthExcelInput } from "@/utils/emotionalHealthExcel";
 
 interface OrganizationOption {
   _id: string;
@@ -576,6 +578,11 @@ export default function WellbeingAnalyticsPage() {
   const [tenantIds, setTenantIds] = useState<string[]>([]);
   const [year, setYear] = useState(String(currentYear));
   const [months, setMonths] = useState<string[]>([String(currentMonth)]);
+  const [departments, setDepartments] = useState<string[]>([]);
+  const [officeLocations, setOfficeLocations] = useState<string[]>([]);
+  const [departmentOptions, setDepartmentOptions] = useState<string[]>([]);
+  const [officeLocationOptions, setOfficeLocationOptions] = useState<string[]>([]);
+  const [loadingAttributes, setLoadingAttributes] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [rows, setRows] = useState<WellbeingMonthRow[]>([]);
@@ -583,6 +590,7 @@ export default function WellbeingAnalyticsPage() {
   const [categoryRows, setCategoryRows] = useState<CategoryMonthRow[]>([]);
   const [featureUsageRows, setFeatureUsageRows] = useState<FeatureUsageRow[]>([]);
   const [orgSummaryRows, setOrgSummaryRows] = useState<OrgSummaryResult[]>([]);
+  const [orgPeriodSummaryRows, setOrgPeriodSummaryRows] = useState<OrgSummaryResult[]>([]);
   const [mauMonthlyRows, setMauMonthlyRows] = useState<
     Array<{ year: number; month: number; activeUsers: number }>
   >([]);
@@ -674,19 +682,72 @@ export default function WellbeingAnalyticsPage() {
     fetchPlatforms();
   }, [isAuthenticated, router]);
 
+  const fetchUserAttributes = useCallback(
+    async (platformKey: string, orgs: OrganizationOption[]) => {
+      if (!platformKey || orgs.length === 0) {
+        setDepartmentOptions([]);
+        setOfficeLocationOptions([]);
+        setDepartments([]);
+        setOfficeLocations([]);
+        return;
+      }
+      setLoadingAttributes(true);
+      try {
+        const data = await post<{ departments: string[]; officeLocations: string[] }>(
+          "/admin/organization-user-attributes",
+          {
+            platformKey,
+            tIds: orgs.map((org) => org.tId),
+          },
+        );
+        const nextDepartments = data?.departments || [];
+        const nextLocations = data?.officeLocations || [];
+        setDepartmentOptions(nextDepartments);
+        setOfficeLocationOptions(nextLocations);
+        setDepartments((prev) => prev.filter((value) => nextDepartments.includes(value)));
+        setOfficeLocations((prev) => prev.filter((value) => nextLocations.includes(value)));
+      } catch (e) {
+        console.error("Error fetching user attributes:", e);
+        setDepartmentOptions([]);
+        setOfficeLocationOptions([]);
+        setDepartments([]);
+        setOfficeLocations([]);
+      } finally {
+        setLoadingAttributes(false);
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     setTenantIds([]);
+    setDepartments([]);
+    setOfficeLocations([]);
+    setDepartmentOptions([]);
+    setOfficeLocationOptions([]);
     setOrganisationOptions([]);
     setRows([]);
     setDriverRows([]);
     setCategoryRows([]);
     setFeatureUsageRows([]);
     setOrgSummaryRows([]);
+    setOrgPeriodSummaryRows([]);
     setMauMonthlyRows([]);
     setChatMonthlyRows([]);
     setHasLoaded(false);
     if (platform) fetchOrganisations(platform);
   }, [platform]);
+
+  useEffect(() => {
+    if (!platform || selectedOrgs.length === 0) {
+      setDepartmentOptions([]);
+      setOfficeLocationOptions([]);
+      setDepartments([]);
+      setOfficeLocations([]);
+      return;
+    }
+    fetchUserAttributes(platform, selectedOrgs);
+  }, [platform, selectedOrgs, fetchUserAttributes]);
 
   const mapRecords = useCallback(
     (records: WellbeingAnalyticsRecord[]): WellbeingMonthRow[] =>
@@ -970,6 +1031,56 @@ export default function WellbeingAnalyticsPage() {
     return { categories, orgUsers };
   }, [categoryRows]);
 
+  const getEmotionalHealthExcelPayload = useCallback((): EmotionalHealthExcelInput => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    return {
+      fileName: `emotional-health-${platform || "export"}-${year || currentYear}-${stamp}.xlsx`,
+      driverKeys: DRIVER_ORDER,
+      driverTitles: DRIVER_TITLES,
+      driverRows: driverRows.map((row) => ({
+        platformKey: row.platformKey,
+        orgName: row.orgName,
+        tId: row.tId,
+        monthLabel: formatMonth(row.month, row.year),
+        userCount: row.userCount,
+        drivers: Object.fromEntries(
+          DRIVER_ORDER.map((key) => [
+            key,
+            {
+              avgScore: row.drivers[key]?.avgScore ?? null,
+              usersWithData: row.drivers[key]?.usersWithData ?? 0,
+            },
+          ]),
+        ),
+      })),
+      driverTotals: driverTableTotals,
+      categoryKeys: CATEGORY_ORDER,
+      categoryTitles: CATEGORY_TITLES,
+      categoryRows: categoryRows.map((row) => ({
+        platformKey: row.platformKey,
+        orgName: row.orgName,
+        tId: row.tId,
+        monthLabel: formatMonth(row.month, row.year),
+        userCount: row.userCount,
+        categories: Object.fromEntries(
+          CATEGORY_ORDER.map((key) => [
+            key,
+            {
+              avgScore: row.categories[key]?.avgScore ?? null,
+              usersWithData: row.categories[key]?.usersWithData ?? 0,
+              pctAtOrAboveThreshold: row.categories[key]?.pctAtOrAboveThreshold ?? null,
+            },
+          ]),
+        ),
+      })),
+      categoryTotals: categoryTableTotals,
+    };
+  }, [platform, year, driverRows, driverTableTotals, categoryRows, categoryTableTotals]);
+
+  const handleEmotionalHealthExportError = useCallback((message: string) => {
+    setError(message);
+  }, []);
+
   const featureUsageTableTotals = useMemo(() => {
     if (!featureUsageTableRows.length) return null;
     let usersWithFeature = 0;
@@ -1086,6 +1197,7 @@ export default function WellbeingAnalyticsPage() {
     setCategoryRows([]);
     setFeatureUsageRows([]);
     setOrgSummaryRows([]);
+    setOrgPeriodSummaryRows([]);
     setMauMonthlyRows([]);
     setChatMonthlyRows([]);
     setHasLoaded(true);
@@ -1096,6 +1208,7 @@ export default function WellbeingAnalyticsPage() {
     const allCategoryRecords: EmotionalCategoryAnalyticsRecord[] = [];
     const allFeatureUsageRecords: FeatureUsageAnalyticsRecord[] = [];
     const allOrgSummary: OrgSummaryResult[] = [];
+    const allOrgPeriodSummary: OrgSummaryResult[] = [];
     const allMauMonthly = new Map<string, number>();
     const allChatMonthly: ChatMonthlyRow[] = [];
     const selectedMonths = months.map(Number).sort((a, b) => a - b);
@@ -1106,22 +1219,55 @@ export default function WellbeingAnalyticsPage() {
     const wellbeingLookbackByYear = monthsEndingAtByYear(yearNum, endMonth, 6);
     // Feature usage lookback for rolling 6-month Effectiveness / Personalize on the dashboard.
     const featureLookbackByYear = wellbeingLookbackByYear;
+    // Lifetime MAU = year-to-date (all months through now for current year; full year for past).
+    const lifetimeMonths =
+      yearNum < currentYear
+        ? Array.from({ length: 12 }, (_, i) => i + 1)
+        : yearNum > currentYear
+          ? []
+          : Array.from({ length: currentMonth }, (_, i) => i + 1);
     const chatStartDate = `${yearNum}-${String(startMonth).padStart(2, "0")}-01`;
     const chatEndDay = new Date(Date.UTC(yearNum, endMonth, 0)).getUTCDate();
     const chatEndDate = `${yearNum}-${String(endMonth).padStart(2, "0")}-${String(chatEndDay).padStart(2, "0")}`;
     let completedTenants = 0;
 
+    /** Absorb monthly actives; optionally only one calendar month (chart chunks). */
     const absorbMauMonthActives = (
       summary: OrganizationAnalyticsSummaryRow | null | undefined,
       forYear: number,
+      onlyMonth?: number,
     ) => {
       if (!summary) return;
-      for (let m = 1; m <= 12; m++) {
+      const monthsToRead =
+        onlyMonth != null ? [onlyMonth] : Array.from({ length: 12 }, (_, i) => i + 1);
+      for (const m of monthsToRead) {
         const raw = summary[`m${m} Active`];
         if (typeof raw !== "number") continue;
         const key = `${forYear}-${m}`;
         allMauMonthly.set(key, (allMauMonthly.get(key) || 0) + raw);
       }
+    };
+
+    const mapOrgSummaryResults = (
+      response: OrganizationAnalyticsResponse | null,
+      batch: typeof selectedOrgs,
+    ): OrgSummaryResult[] => {
+      if (!response) return [];
+      const byTid = new Map((response.results || []).map((result) => [result.tId, result]));
+      return batch.map((org) => {
+        const result = byTid.get(org.tId);
+        const summaryRow = result?.summaryRow ?? (batch.length === 1 ? response.summaryRow : null);
+        const summaryRecord = (result?.records || response.records || []).find(
+          (record) => record.tId === org.tId && record.periodType === "summary",
+        );
+        return {
+          orgId: org._id,
+          orgName: org.name,
+          tId: org.tId,
+          summaryRow,
+          status: summaryRow?.status || summaryRecord?.status || "—",
+        };
+      });
     };
 
     try {
@@ -1134,11 +1280,16 @@ export default function WellbeingAnalyticsPage() {
 
         const batch = batches[i];
         const tIds = batch.map((org) => org.tId);
+        const attributeFilters = {
+          ...(departments.length ? { departments } : {}),
+          ...(officeLocations.length ? { officeLocations } : {}),
+        };
         const payloadBase = {
           platformKey: platform,
           tIds,
           year: yearNum,
           months: selectedMonths,
+          ...attributeFilters,
         };
 
         const wellbeingRequests = wellbeingLookbackByYear.map((slot) =>
@@ -1148,6 +1299,7 @@ export default function WellbeingAnalyticsPage() {
             year: slot.year,
             months: slot.months,
             viewMode: "organization",
+            ...attributeFilters,
           }),
         );
 
@@ -1157,36 +1309,18 @@ export default function WellbeingAnalyticsPage() {
             tIds,
             year: slot.year,
             months: slot.months,
+            ...attributeFilters,
           }),
         );
-
-        // Expand weeks across the 6-month lookback so summary includes mN Active for the MAU chart.
-        const orgAnalyticsRequests = wellbeingLookbackByYear.map((slot) => {
-          const weeksForYear = isoWeeksForMonths(slot.year, slot.months);
-          if (!weeksForYear.length) return Promise.resolve(null);
-          return post<OrganizationAnalyticsResponse>("/admin/organization-analytics", {
-            platformKey: platform,
-            tIds,
-            year: slot.year,
-            weeks: weeksForYear,
-            includeSummary: true,
-            trigger: false,
-          }).catch((err) => {
-            console.error(`Org analytics summary fetch failed for ${slot.year}:`, err);
-            return null;
-          });
-        });
 
         const requests: [
           Promise<WellbeingAnalyticsResponse[]>,
           Promise<EmotionalDriverAnalyticsResponse>,
           Promise<FeatureUsageAnalyticsResponse[]>,
-          Promise<Array<OrganizationAnalyticsResponse | null>>,
         ] = [
           Promise.all(wellbeingRequests),
           post<EmotionalDriverAnalyticsResponse>("/admin/emotional-drivers-analytics", payloadBase),
           Promise.all(featureUsageRequests),
-          Promise.all(orgAnalyticsRequests),
         ];
 
         const chatMonthlyPromises = batch.map((org) =>
@@ -1206,8 +1340,7 @@ export default function WellbeingAnalyticsPage() {
           Promise.all(chatMonthlyPromises),
         ]);
 
-        const [wellbeingResponses, driversResponse, featureUsageResponses, orgAnalyticsResponses] =
-          coreResults;
+        const [wellbeingResponses, driversResponse, featureUsageResponses] = coreResults;
 
         for (const wellbeingResponse of wellbeingResponses) {
           allRecords.push(...(wellbeingResponse?.records || []));
@@ -1221,47 +1354,6 @@ export default function WellbeingAnalyticsPage() {
           allChatMonthly.push(...(chatRes?.records || []));
         }
 
-        // Prefer selected-year org summary for the MAU metrics table / Current Summary.
-        const primaryOrgIdx = wellbeingLookbackByYear.findIndex((slot) => slot.year === yearNum);
-        const primaryOrgResponse =
-          (primaryOrgIdx >= 0 ? orgAnalyticsResponses[primaryOrgIdx] : null) ||
-          orgAnalyticsResponses.find(Boolean) ||
-          null;
-
-        if (primaryOrgResponse) {
-          const byTid = new Map(
-            (primaryOrgResponse.results || []).map((result) => [result.tId, result]),
-          );
-          for (const org of batch) {
-            const result = byTid.get(org.tId);
-            const summaryRow =
-              result?.summaryRow ?? (batch.length === 1 ? primaryOrgResponse.summaryRow : null);
-            const summaryRecord = (result?.records || primaryOrgResponse.records || []).find(
-              (record) => record.tId === org.tId && record.periodType === "summary",
-            );
-            allOrgSummary.push({
-              orgId: org._id,
-              orgName: org.name,
-              tId: org.tId,
-              summaryRow,
-              status: summaryRow?.status || summaryRecord?.status || "—",
-            });
-          }
-        }
-
-        for (let yi = 0; yi < wellbeingLookbackByYear.length; yi++) {
-          const slot = wellbeingLookbackByYear[yi];
-          const orgRes = orgAnalyticsResponses[yi];
-          if (!orgRes) continue;
-          const byTid = new Map((orgRes.results || []).map((result) => [result.tId, result]));
-          for (const org of batch) {
-            const result = byTid.get(org.tId);
-            const summaryRow =
-              result?.summaryRow ?? (batch.length === 1 ? orgRes.summaryRow : null);
-            absorbMauMonthActives(summaryRow, slot.year);
-          }
-        }
-
         completedTenants += batch.length;
 
         if (requestId !== requestRef.current) return;
@@ -1269,14 +1361,135 @@ export default function WellbeingAnalyticsPage() {
         setDriverRows(mapDriverRecords(allDriverRecords));
         setCategoryRows(mapCategoryRecords(allCategoryRecords));
         setFeatureUsageRows(mapFeatureUsageRecords(allFeatureUsageRecords));
-        setOrgSummaryRows([...allOrgSummary].sort((a, b) => a.orgName.localeCompare(b.orgName)));
-        setMauMonthlyRows(
-          [...allMauMonthly.entries()].map(([key, activeUsers]) => {
-            const [y, m] = key.split("-").map(Number);
-            return { year: y, month: m, activeUsers };
-          }),
-        );
         setChatMonthlyRows(mergeChatMonthlyRows(allChatMonthly));
+
+        // MAU: Period + Lifetime in parallel (mauLite is light enough). Chart is 1 request per
+        // lookback year (all months in that year) instead of 6 sequential month calls.
+        const periodWeeks = isoWeeksForMonths(yearNum, selectedMonths);
+        const lifetimeWeeks = isoWeeksForMonths(yearNum, lifetimeMonths);
+        const chartBatch = batch;
+        const chartTIds = tIds;
+        const publishMauChart = () => {
+          setMauMonthlyRows(
+            [...allMauMonthly.entries()].map(([key, activeUsers]) => {
+              const [y, m] = key.split("-").map(Number);
+              return { year: y, month: m, activeUsers };
+            }),
+          );
+        };
+
+        const mauStripTasks: Promise<void>[] = [];
+
+        if (periodWeeks.length > 0) {
+          mauStripTasks.push(
+            (async () => {
+              try {
+                const periodOrgResponse = await post<OrganizationAnalyticsResponse>(
+                  "/admin/organization-analytics",
+                  {
+                    platformKey: platform,
+                    tIds,
+                    year: yearNum,
+                    weeks: periodWeeks,
+                    includeSummary: true,
+                    trigger: false,
+                    mauLite: true,
+                    summaryOnly: true,
+                    ...attributeFilters,
+                  },
+                );
+                if (requestId !== requestRef.current) return;
+                allOrgPeriodSummary.push(...mapOrgSummaryResults(periodOrgResponse, batch));
+                setOrgPeriodSummaryRows(
+                  [...allOrgPeriodSummary].sort((a, b) => a.orgName.localeCompare(b.orgName)),
+                );
+              } catch (err) {
+                console.error(`Period org analytics fetch failed for ${yearNum}:`, err);
+                setError(
+                  err instanceof Error
+                    ? `MAU Period failed: ${err.message}`
+                    : "MAU Period failed to load",
+                );
+              }
+            })(),
+          );
+        }
+
+        if (lifetimeWeeks.length > 0) {
+          mauStripTasks.push(
+            (async () => {
+              try {
+                const lifetimeOrgResponse = await post<OrganizationAnalyticsResponse>(
+                  "/admin/organization-analytics",
+                  {
+                    platformKey: platform,
+                    tIds,
+                    year: yearNum,
+                    weeks: lifetimeWeeks,
+                    includeSummary: true,
+                    trigger: false,
+                    mauLite: true,
+                    summaryOnly: true,
+                  },
+                );
+                if (requestId !== requestRef.current) return;
+                allOrgSummary.push(...mapOrgSummaryResults(lifetimeOrgResponse, batch));
+                setOrgSummaryRows(
+                  [...allOrgSummary].sort((a, b) => a.orgName.localeCompare(b.orgName)),
+                );
+              } catch (err) {
+                console.error(`Lifetime org analytics fetch failed for ${yearNum}:`, err);
+                setError(
+                  err instanceof Error
+                    ? `MAU Lifetime failed: ${err.message}`
+                    : "MAU Lifetime failed to load",
+                );
+              }
+            })(),
+          );
+        }
+
+        await Promise.all(mauStripTasks);
+        if (requestId !== requestRef.current) return;
+
+        // Non-blocking chart: one mauLite includeMonths call per lookback year.
+        void (async () => {
+          await Promise.all(
+            wellbeingLookbackByYear.map(async (slot) => {
+              if (requestId !== requestRef.current) return;
+              const chartMonths = [...slot.months].sort((a, b) => a - b);
+              const weeksForMonths = isoWeeksForMonths(slot.year, chartMonths);
+              if (!weeksForMonths.length || !chartMonths.length) return;
+              try {
+                const chartResponse = await post<OrganizationAnalyticsResponse>(
+                  "/admin/organization-analytics",
+                  {
+                    platformKey: platform,
+                    tIds: chartTIds,
+                    year: slot.year,
+                    weeks: weeksForMonths,
+                    months: chartMonths,
+                    includeSummary: false,
+                    trigger: false,
+                    mauLite: true,
+                    summaryOnly: true,
+                    includeMonths: true,
+                    ...attributeFilters,
+                  },
+                );
+                if (requestId !== requestRef.current) return;
+                for (const row of mapOrgSummaryResults(chartResponse, chartBatch)) {
+                  for (const month of chartMonths) {
+                    absorbMauMonthActives(row.summaryRow, slot.year, month);
+                  }
+                }
+                publishMauChart();
+              } catch (err) {
+                console.error(`MAU chart failed for ${slot.year}:`, err);
+              }
+            }),
+          );
+        })();
       }
 
       if (requestId !== requestRef.current) return;
@@ -1300,6 +1513,7 @@ export default function WellbeingAnalyticsPage() {
         setCategoryRows([]);
         setFeatureUsageRows([]);
         setOrgSummaryRows([]);
+        setOrgPeriodSummaryRows([]);
         setMauMonthlyRows([]);
         setChatMonthlyRows([]);
         setHasLoaded(false);
@@ -1315,6 +1529,8 @@ export default function WellbeingAnalyticsPage() {
     selectedOrgs,
     year,
     months,
+    departments,
+    officeLocations,
     mapRecords,
     mapDriverRecords,
     mapCategoryRecords,
@@ -1376,12 +1592,51 @@ export default function WellbeingAnalyticsPage() {
                 allowSelectAll
                 searchable
               />
+
+              <MultiSelect
+                label="Departments"
+                options={departmentOptions.map((value) => ({ value, label: value }))}
+                value={departments}
+                onChange={setDepartments}
+                placeholder={
+                  loadingAttributes
+                    ? "Loading departments..."
+                    : selectedOrgs.length === 0
+                      ? "Select tenants first"
+                      : "All departments"
+                }
+                searchPlaceholder="Search departments..."
+                emptyMessage="No departments found for selected tenants"
+                disabled={selectedOrgs.length === 0 || loadingAttributes}
+                allowSelectAll
+                searchable
+              />
+
+              <MultiSelect
+                label="Locations"
+                options={officeLocationOptions.map((value) => ({ value, label: value }))}
+                value={officeLocations}
+                onChange={setOfficeLocations}
+                placeholder={
+                  loadingAttributes
+                    ? "Loading locations..."
+                    : selectedOrgs.length === 0
+                      ? "Select tenants first"
+                      : "All locations"
+                }
+                searchPlaceholder="Search locations..."
+                emptyMessage="No locations found for selected tenants"
+                disabled={selectedOrgs.length === 0 || loadingAttributes}
+                allowSelectAll
+                searchable
+              />
             </div>
 
             <p className="mt-4 text-xs text-gray-500">
               Loads organization-level wellbeing and emotional-driver metrics for the selected year
-              and month(s). Wellbeing from User_Wellbeing_Data; drivers from User_Emotional_Health
-              (Brew + Mindful Minute).
+              and month(s). Department and location filters use each user&apos;s profile attributes
+              for the selected organization(s); blank values appear as Unassigned. Wellbeing from
+              User_Wellbeing_Data; drivers from User_Emotional_Health (Brew + Mindful Minute).
             </p>
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -1420,6 +1675,7 @@ export default function WellbeingAnalyticsPage() {
             categoryRows={categoryRows}
             featureRows={featureUsageRows}
             orgSummaryRows={orgSummaryRows}
+            orgPeriodSummaryRows={orgPeriodSummaryRows}
             mauMonthlyRows={mauMonthlyRows}
             chatMonthlyRows={chatMonthlyRows}
           />
@@ -1432,8 +1688,8 @@ export default function WellbeingAnalyticsPage() {
             </CardHeader>
             <CardContent>
               <p className="mb-3 text-xs text-gray-500">
-                Same columns as Org Analytics. Uses cached org-analytics summary for weeks that
-                overlap the selected months (generate from Org Analytics if status is empty).
+                Same columns as Org Analytics. Lifetime / year-to-date MAU (unfiltered by department
+                or location), computed live for Client Report.
               </p>
               <div className="max-h-96 overflow-auto">
                 <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -1694,7 +1950,16 @@ export default function WellbeingAnalyticsPage() {
         {hasLoaded && (
           <Card>
             <CardHeader>
-              <CardTitle>Emotional health — organization monthly metrics (10 indicators)</CardTitle>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <CardTitle>
+                  Emotional health — organization monthly metrics (10 indicators)
+                </CardTitle>
+                <EmotionalHealthExportButton
+                  disabled={driverRows.length === 0 && categoryRows.length === 0}
+                  getPayload={getEmotionalHealthExcelPayload}
+                  onError={handleEmotionalHealthExportError}
+                />
+              </div>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto max-h-[32rem]">
@@ -1837,7 +2102,14 @@ export default function WellbeingAnalyticsPage() {
         {hasLoaded && (
           <Card>
             <CardHeader>
-              <CardTitle>Emotional health — category indicators (4)</CardTitle>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <CardTitle>Emotional health — category indicators (4)</CardTitle>
+                <EmotionalHealthExportButton
+                  disabled={driverRows.length === 0 && categoryRows.length === 0}
+                  getPayload={getEmotionalHealthExcelPayload}
+                  onError={handleEmotionalHealthExportError}
+                />
+              </div>
             </CardHeader>
             <CardContent>
               <p className="mb-4 text-xs text-gray-500">
