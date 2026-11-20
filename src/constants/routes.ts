@@ -14,6 +14,9 @@ export const ROUTES = {
   ORGANIZATION_ANALYTICS: "/organization-analytics",
   ORG_ANALYTICS: "/org-analytics",
   CLIENT_REPORT: "/client-report",
+  TIERS: "/tiers",
+  TIER_MANAGE: "/tiers/manage",
+  FEATURE_MANAGE: "/tiers/features",
 } as const;
 
 // Route Groups
@@ -29,5 +32,8 @@ export const ROUTE_GROUPS = {
     ROUTES.ORGANIZATION_ANALYTICS,
     ROUTES.ORG_ANALYTICS,
     ROUTES.CLIENT_REPORT,
+    ROUTES.TIERS,
+    ROUTES.TIER_MANAGE,
+    ROUTES.FEATURE_MANAGE,
   ],
 } as const;

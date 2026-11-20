@@ -18,13 +18,13 @@ export function TopNav() {
 
   const nav = [
     { label: "Dashboard", href: ROUTES.DASHBOARD },
+    { label: "Tiers", href: ROUTES.TIERS },
     { label: "Prompts", href: ROUTES.PROMPTS },
     { label: "Chats", href: ROUTES.CHATS },
     { label: "Notification Logs", href: ROUTES.NOTIFICATION_LOGS },
     { label: "Teams Card Logs", href: ROUTES.TEAMS_CARD_LOGS },
     { label: "Org Analytics", href: ROUTES.ORGANIZATION_ANALYTICS },
     { label: "Client Report", href: ROUTES.CLIENT_REPORT },
-    { label: "Users", href: ROUTES.USERS },
   ];
 
   const performLogout = () => {
@@ -58,14 +58,14 @@ export function TopNav() {
           </Link>
 
           {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center space-x-1">
+          <div className="hidden md:flex min-w-0 items-center space-x-0.5 overflow-x-auto">
             {nav.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + "/");
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`relative px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                  className={`relative shrink-0 px-2.5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                     active
                       ? "bg-gradient-to-r from-[#1f00a3] to-[#1a0088] text-white shadow-md"
                       : "text-gray-700 hover:text-[#1f00a3] hover:bg-[#1f00a3]/5"
