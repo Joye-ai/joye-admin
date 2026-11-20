@@ -1433,7 +1433,7 @@ export function WellbeingDashboard({
                     &gt;6 is good. &gt;7 is ideal.
                   </p>
                 </div>
-                <p className="pt-3 text-left text-[10px] font-medium leading-relaxed text-slate-500">
+                <p className="pt-3 text-center text-[10px] font-medium leading-relaxed text-slate-500">
                   Consolidated unit of Wellbeing across Stress, Anxiety, Irritability, Motivation,
                   Relationships, Optimism and Psychological Safety
                 </p>
