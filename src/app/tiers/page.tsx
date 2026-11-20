@@ -200,6 +200,19 @@ function formatWhen(value: number | null) {
   });
 }
 
+function formatWhenWithTime(value: number | null) {
+  if (!value) return "Open";
+  return new Date(value).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  });
+}
+
 function userLabel(user: UserOption) {
   return user.displayName || user.email || user.employeeId || user._id;
 }
@@ -237,6 +250,8 @@ export default function TiersPage() {
   const [pendingCancel, setPendingCancel] = useState<Entitlement | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyTitle, setHistoryTitle] = useState("");
+  const [historyMode, setHistoryMode] = useState<"scope" | "grant">("scope");
+  const [historyScope, setHistoryScope] = useState<"all" | "platform" | "tenant" | "user">("all");
   const [historyRows, setHistoryRows] = useState<HistoryEvent[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
@@ -443,7 +458,7 @@ export default function TiersPage() {
     setError("");
     setNotice("");
     try {
-      await post("/admin/tiers/entitlements", {
+      const saved = await post<{ replaced?: string[] }>("/admin/tiers/entitlements", {
         platformKey,
         tId: tId || undefined,
         userId: userId || undefined,
@@ -453,7 +468,12 @@ export default function TiersPage() {
         source,
       });
       const name = tiers.find((tier) => tier.key === tierKey)?.name || tierKey;
-      setNotice(`${name} saved as its own grant.`);
+      const replaced = saved.replaced || [];
+      setNotice(
+        replaced.length
+          ? `${name} is now the plan. ${replaced.join(", ")} ${replaced.length === 1 ? "is" : "are"} no longer in force at this level.`
+          : `${name} saved as its own grant.`,
+      );
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Assignment failed");
@@ -537,6 +557,8 @@ export default function TiersPage() {
     if (!platformKey) return;
     setHistoryOpen(true);
     setHistoryTitle(title);
+    setHistoryMode(query.refId ? "grant" : "scope");
+    setHistoryScope("all");
     setHistoryRows([]);
     setHistoryError("");
     setHistoryLoading(true);
@@ -639,6 +661,30 @@ export default function TiersPage() {
           }))
         : [];
   const chatPages = resolvedFeatures.filter((feature) => feature.chatOnPage);
+  const historyScopeLabel = (event: HistoryEvent) => {
+    if (event.scope === "user") {
+      const person = users.find((user) => user._id === event.userId);
+      return person ? `User · ${userLabel(person)}` : "User";
+    }
+    if (event.scope === "tenant") {
+      const tenant = tenants.find((item) => item.tId === event.tId);
+      return `Tenant · ${tenant?.name || event.tId || "Tenant"}`;
+    }
+    return `Platform · ${overview?.context.platform?.name || platformKey}`;
+  };
+  const visibleHistory = historyRows.filter(
+    (event) => historyScope === "all" || event.scope === historyScope,
+  );
+  const historyScopeCount = (scope: HistoryEvent["scope"]) =>
+    historyRows.filter((event) => event.scope === scope).length;
+  const historyHint =
+    historyMode === "grant"
+      ? "This grant only. Newest change first."
+      : userId
+        ? "Platform, this tenant, and this user. Newest change first."
+        : tId
+          ? "Platform, this tenant, and its users. Newest change first."
+          : "This platform, including every tenant and user. Newest change first.";
 
   return (
     <Layout
@@ -926,15 +972,25 @@ export default function TiersPage() {
               .map((key) => featureByKey.get(key))
               .filter(Boolean) as Feature[];
             const selectedCard = selectedAddon === tier.key;
-            const inForce = inForceKeys.has(tier.key);
+            const assignedGrant = applicable.addons.find(
+              (row) => row.tierKey === tier.key && row.status === "active",
+            );
+            const inForce = Boolean(assignedGrant);
             return (
-              <button
+              <div
                 key={tier.key}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() =>
                   setSelectedAddon((current) => (current === tier.key ? "" : tier.key))
                 }
-                className={`flex h-full flex-col rounded-xl border bg-white p-5 text-left shadow-sm transition ${
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedAddon((current) => (current === tier.key ? "" : tier.key));
+                  }
+                }}
+                className={`flex h-full cursor-pointer flex-col rounded-xl border bg-white p-5 text-left shadow-sm transition ${
                   selectedCard
                     ? "border-[#1f00a3] ring-2 ring-[#1f00a3]"
                     : "border-gray-200 hover:border-[#1f00a3]/40"
@@ -945,11 +1001,27 @@ export default function TiersPage() {
                     <p className="text-lg font-semibold text-gray-900">{tier.name}</p>
                     <p className="mt-1 text-sm text-gray-600">{tier.description}</p>
                   </div>
-                  {inForce && (
-                    <span className="shrink-0 rounded-full bg-green-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-green-800">
-                      In force
-                    </span>
-                  )}
+                  <div className="flex shrink-0 flex-col items-end gap-2">
+                    {inForce && (
+                      <span className="rounded-full bg-green-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-green-800">
+                        In force
+                      </span>
+                    )}
+                    {assignedGrant && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="!border-red-200 !text-red-700 hover:!bg-red-50"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setPendingCancel(assignedGrant);
+                        }}
+                      >
+                        Remove
+                        {assignedGrant.scope === exactScope ? "" : ` ${assignedGrant.scope} grant`}
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 <ul className="mt-3 space-y-1.5">
                   {added.map((feature) => (
@@ -959,7 +1031,7 @@ export default function TiersPage() {
                     </li>
                   ))}
                 </ul>
-              </button>
+              </div>
             );
           })}
           {addonTiers.length === 0 && (
@@ -974,7 +1046,7 @@ export default function TiersPage() {
           <CardContent>
             <p className="mb-4 text-sm text-gray-600">
               {platformKey
-                ? `Each button writes a new grant for ${scopeLabel}. A plan and an add-on stay as two rows, and their features add together.`
+                ? `Each button writes a grant for ${scopeLabel}. A new plan replaces the other plan at this level. An add-on stays beside the plan.`
                 : "Select a platform, then a plan. An add-on can be saved beside it as a second grant."}
             </p>
             <div className="grid gap-4 md:grid-cols-3">
@@ -1336,37 +1408,63 @@ export default function TiersPage() {
       )}
       {historyOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/40 p-4"
           onClick={() => setHistoryOpen(false)}
         >
           <div
-            className="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-lg bg-white p-5 shadow-lg"
+            className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-lg"
             onClick={(event) => event.stopPropagation()}
             role="dialog"
             aria-label={historyTitle}
           >
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">{historyTitle}</h3>
-                <p className="mt-1 text-sm text-gray-600">Newest change first.</p>
+            <div className="shrink-0 border-b border-gray-200 px-5 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">{historyTitle}</h3>
+                  <p className="mt-1 text-sm text-gray-600">{historyHint}</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => setHistoryOpen(false)}>
+                  Close
+                </Button>
               </div>
-              <Button size="sm" variant="outline" onClick={() => setHistoryOpen(false)}>
-                Close
-              </Button>
+              {historyMode === "scope" && historyRows.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {(
+                    [
+                      ["all", "All", historyRows.length],
+                      ["platform", "Platform", historyScopeCount("platform")],
+                      ["tenant", "Tenant", historyScopeCount("tenant")],
+                      ["user", "User", historyScopeCount("user")],
+                    ] as const
+                  ).map(([value, label, count]) => (
+                    <Button
+                      key={value}
+                      size="sm"
+                      variant={historyScope === value ? "primary" : "outline"}
+                      onClick={() => setHistoryScope(value)}
+                    >
+                      {label} ({count})
+                    </Button>
+                  ))}
+                </div>
+              )}
             </div>
-            {historyLoading && <Loader size="sm" inline />}
-            {historyError && (
-              <div className="mb-3">
-                <Alert variant="error">{historyError}</Alert>
-              </div>
-            )}
-            {!historyLoading && !historyError && historyRows.length === 0 && (
-              <p className="text-sm text-gray-600">No changes recorded yet.</p>
-            )}
-            {historyRows.length > 0 && (
-              <div className="overflow-x-auto">
+            <div className="max-h-[calc(85vh-9rem)] overflow-auto px-5 py-4">
+              {historyLoading && <Loader size="sm" inline />}
+              {historyError && (
+                <div className="mb-3">
+                  <Alert variant="error">{historyError}</Alert>
+                </div>
+              )}
+              {!historyLoading && !historyError && historyRows.length === 0 && (
+                <p className="text-sm text-gray-600">No changes recorded yet.</p>
+              )}
+              {!historyLoading && historyRows.length > 0 && visibleHistory.length === 0 && (
+                <p className="text-sm text-gray-600">No changes for this scope.</p>
+              )}
+              {visibleHistory.length > 0 && (
                 <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead>
+                  <thead className="sticky top-0 bg-white">
                     <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
                       <th className="px-3 py-2">When</th>
                       <th className="px-3 py-2">Scope</th>
@@ -1375,18 +1473,20 @@ export default function TiersPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {historyRows.map((event) => (
+                    {visibleHistory.map((event) => (
                       <tr key={event.id}>
-                        <td className="px-3 py-3 whitespace-nowrap">{formatWhen(event.at)}</td>
-                        <td className="px-3 py-3 capitalize">{event.scope}</td>
+                        <td className="px-3 py-3 whitespace-nowrap">
+                          {formatWhenWithTime(event.at)}
+                        </td>
+                        <td className="px-3 py-3">{historyScopeLabel(event)}</td>
                         <td className="px-3 py-3 capitalize">{event.action}</td>
                         <td className="px-3 py-3">{event.summary}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}
