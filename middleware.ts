@@ -14,6 +14,7 @@ export function middleware(request: NextRequest) {
     "/notification-logs",
     "/teams-card-logs",
     "/organization-analytics",
+    "/tiers",
   ].some((p) => pathname.startsWith(p));
 
   if (!token && isProtected) {
@@ -47,6 +48,8 @@ export const config = {
     "/teams-card-logs/:path*",
     "/organization-analytics",
     "/organization-analytics/:path*",
+    "/tiers",
+    "/tiers/:path*",
     "/login",
     "/login/:path*",
   ],
