@@ -1,25 +1,37 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Layout } from "@/components/layout";
 import {
   Alert,
+  FloatingAlerts,
   Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
   Input,
+  LevelFilter,
   Loader,
   MultiSelect,
   SearchableSelect,
 } from "@/components/ui";
+import type { AssignmentLevel } from "@/components/ui";
 import { ROUTES } from "@/constants";
 import { get, patch, post } from "@/helpers/api";
 import { useAppSelector } from "@/store";
+import {
+  dateInputFromIst,
+  DEFAULT_TIME_ZONE,
+  endOfIstDay,
+  formatIstDate,
+  formatIstDateTime,
+  startOfIstDay,
+  todayIstInput,
+} from "@/utils/istDate";
 
 type Feature = {
   key: string;
@@ -63,6 +75,7 @@ type Entitlement = {
   source: string;
   scope: "platform" | "tenant" | "user";
   inForce: boolean;
+  assigneeName?: string;
 };
 
 type TrialPolicy = {
@@ -90,6 +103,7 @@ type HistoryEvent = {
 
 type Overview = {
   catalogReady: boolean;
+  timeZone?: string;
   features: Feature[];
   tiers: Tier[];
   entitlements: Entitlement[];
@@ -113,7 +127,12 @@ type Overview = {
   };
 };
 
-type CatalogResponse = { catalogReady: boolean; features: Feature[]; tiers: Tier[] };
+type CatalogResponse = {
+  catalogReady: boolean;
+  timeZone?: string;
+  features: Feature[];
+  tiers: Tier[];
+};
 
 type PlatformOption = { key: string; name: string };
 type TenantOption = { _id: string; name: string; tId: string; inactive?: boolean };
@@ -167,9 +186,8 @@ function grantsForFilter(data: Overview, nextTenant: string, nextUser: string) {
   return { plan, addons };
 }
 
-function dateInput(value: number | null) {
-  if (!value) return "";
-  return new Date(value).toISOString().slice(0, 10);
+function dateInput(value: number | null, timeZone: string) {
+  return dateInputFromIst(value, timeZone);
 }
 
 const STARTS_ON = [
@@ -178,46 +196,31 @@ const STARTS_ON = [
   { value: "consent", label: "Consent" },
 ];
 
-function todayInput() {
-  return new Date().toISOString().slice(0, 10);
+function todayInput(timeZone: string) {
+  return todayIstInput(timeZone);
 }
 
-function startOfUtcDay(value: string) {
-  return new Date(`${value}T00:00:00.000Z`).getTime();
+function formatWhen(value: number | null, timeZone: string) {
+  return formatIstDate(value, timeZone);
 }
 
-function endOfUtcDay(value: string) {
-  return new Date(`${value}T23:59:59.999Z`).getTime();
-}
-
-function formatWhen(value: number | null) {
-  if (!value) return "Open";
-  return new Date(value).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
-
-function formatWhenWithTime(value: number | null) {
-  if (!value) return "Open";
-  return new Date(value).toLocaleString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "UTC",
-  });
+function formatWhenWithTime(value: number | null, timeZone: string) {
+  return formatIstDateTime(value, timeZone);
 }
 
 function userLabel(user: UserOption) {
   return user.displayName || user.email || user.employeeId || user._id;
 }
 
-export default function TiersPage() {
+function scopeSearch(platform: string, tenant: string, user: string) {
+  const params = new URLSearchParams();
+  if (platform) params.set("platformKey", platform);
+  if (tenant) params.set("tId", tenant);
+  if (tenant && user) params.set("userId", user);
+  return params.toString();
+}
+
+function TiersPageContent() {
   const router = useRouter();
   const isAuthenticated = useAppSelector((s) => s.auth.isAuthenticated);
 
@@ -235,10 +238,12 @@ export default function TiersPage() {
 
   const [selectedTier, setSelectedTier] = useState("");
   const [selectedAddon, setSelectedAddon] = useState("");
-  const [startsOn, setStartsOn] = useState(todayInput());
+  const [startsOn, setStartsOn] = useState(todayInput(DEFAULT_TIME_ZONE));
   const [endsOn, setEndsOn] = useState("");
+  const [timeZone, setTimeZone] = useState(DEFAULT_TIME_ZONE);
   const [source, setSource] = useState("admin");
-  const [listMode, setListMode] = useState<"applies" | "exact">("applies");
+  const [listMode, setListMode] = useState<"applies" | "exact">("exact");
+  const [levelFilter, setLevelFilter] = useState<AssignmentLevel>("all");
   const [showRetired, setShowRetired] = useState(false);
 
   const [policyDays, setPolicyDays] = useState("30");
@@ -248,6 +253,7 @@ export default function TiersPage() {
   const [policyActive, setPolicyActive] = useState(true);
   const [extendDays, setExtendDays] = useState("7");
   const [pendingCancel, setPendingCancel] = useState<Entitlement | null>(null);
+  const [pendingTrialCancel, setPendingTrialCancel] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyTitle, setHistoryTitle] = useState("");
   const [historyMode, setHistoryMode] = useState<"scope" | "grant">("scope");
@@ -269,6 +275,7 @@ export default function TiersPage() {
     setFeatures(data.features);
     setTiers(data.tiers);
     setCatalogReady(data.catalogReady);
+    if (data.timeZone) setTimeZone(data.timeZone);
   }, []);
 
   const loadCatalog = useCallback(async () => {
@@ -282,10 +289,10 @@ export default function TiersPage() {
         setOverview(null);
         setSelectedTier("");
         setSelectedAddon("");
-        setStartsOn(todayInput());
+        setStartsOn(todayInput(timeZone));
         setEndsOn("");
         setSource("admin");
-        setListMode("applies");
+        setListMode("exact");
         setPolicyDays("30");
         setPolicyTiers(["base", "premium_1"]);
         setPolicyAfter(["base"]);
@@ -299,20 +306,30 @@ export default function TiersPage() {
       const data = await get<Overview>("/admin/tiers/overview", params);
       applyCatalog(data);
       setOverview(data);
-      setListMode("applies");
+      setListMode("exact");
+      const zone = data.timeZone || timeZone;
+      if (data.timeZone) setTimeZone(data.timeZone);
+      const exactScope = nextUser ? "user" : nextTenant ? "tenant" : "platform";
       const { plan, addons } = grantsForFilter(data, nextTenant, nextUser);
-      if (plan) {
-        setSelectedTier(plan.tierKey);
-        setStartsOn(dateInput(plan.startsAt) || todayInput());
-        setEndsOn(dateInput(plan.endsAt));
-        setSource(SOURCES.some((item) => item.value === plan.source) ? plan.source : "admin");
+      const ownPlan = plan && plan.scope === exactScope ? plan : null;
+      const ownAddons = addons.filter((row) => row.scope === exactScope);
+      if (ownPlan) {
+        setSelectedTier(ownPlan.tierKey);
+        setStartsOn(dateInput(ownPlan.startsAt, zone) || todayInput(zone));
+        setEndsOn(dateInput(ownPlan.endsAt, zone));
+        setSource(SOURCES.some((item) => item.value === ownPlan.source) ? ownPlan.source : "admin");
+      } else if (plan) {
+        setSelectedTier("");
+        setStartsOn(todayInput(zone));
+        setEndsOn("");
+        setSource("admin");
       } else {
         setSelectedTier(data.resolved.blockedReason ? "" : "base");
-        setStartsOn(todayInput());
+        setStartsOn(todayInput(zone));
         setEndsOn("");
         setSource("admin");
       }
-      setSelectedAddon(addons.length === 1 ? addons[0].tierKey : "");
+      setSelectedAddon(ownAddons.length === 1 ? ownAddons[0].tierKey : "");
       const ownPolicy = nextTenant ? data.policies.tenant : data.policies.platform;
       const shownPolicy = ownPolicy || data.policies.platform;
       if (shownPolicy) {
@@ -329,7 +346,7 @@ export default function TiersPage() {
         setPolicyActive(true);
       }
     },
-    [applyCatalog],
+    [applyCatalog, timeZone],
   );
 
   useEffect(() => {
@@ -353,7 +370,111 @@ export default function TiersPage() {
     };
   }, [isAuthenticated, loadCatalog]);
 
+  const routerParams = useSearchParams();
+  const queryKey = scopeSearch(
+    routerParams.get("platformKey") || "",
+    routerParams.get("tId") || "",
+    routerParams.get("userId") || "",
+  );
+  const writtenQuery = useRef<string | null>(null);
+  const applyGeneration = useRef(0);
+  const loadOverviewRef = useRef(loadOverview);
+  loadOverviewRef.current = loadOverview;
+
+  const replaceScopeUrl = (platform: string, tenant: string, user: string) => {
+    const next = scopeSearch(platform, tenant, user);
+    writtenQuery.current = next;
+    applyGeneration.current += 1;
+    const current = window.location.search.replace(/^\?/, "");
+    if (current === next) return;
+    router.replace(next ? `${ROUTES.TIERS}?${next}` : ROUTES.TIERS, { scroll: false });
+  };
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (writtenQuery.current === queryKey) return;
+    const params = new URLSearchParams(queryKey);
+    const nextPlatform = params.get("platformKey") || "";
+    const nextTenant = params.get("tId") || "";
+    const nextUser = params.get("userId") || "";
+    if (!nextPlatform) {
+      writtenQuery.current = "";
+      return;
+    }
+    const generation = ++applyGeneration.current;
+    let cancelled = false;
+    const stale = () => cancelled || applyGeneration.current !== generation;
+    (async () => {
+      setLoading(true);
+      setNotice("");
+      setError("");
+      setSelectedTier("");
+      setSelectedAddon("");
+      try {
+        let orgs: TenantOption[] = [];
+        try {
+          orgs = await get<TenantOption[]>(`/admin/organization/${nextPlatform}`);
+        } catch {
+          orgs = [];
+        }
+        if (stale()) return;
+        const tenant = nextTenant ? orgs.find((item) => item.tId === nextTenant) : undefined;
+        if (nextTenant && !tenant) {
+          setError("That tenant is not on this platform, so nothing was selected.");
+          writtenQuery.current = queryKey;
+          return;
+        }
+        if (nextUser && !nextTenant) {
+          setError("A user needs a tenant, so nothing was selected.");
+          writtenQuery.current = queryKey;
+          return;
+        }
+        setTenants(orgs);
+        setPlatformKey(nextPlatform);
+        setTId(nextTenant);
+        setUserId("");
+        setUsers([]);
+        let nextUsers: UserOption[] = [];
+        if (tenant) {
+          const data = await get<{ users: UserOption[] }>(`/admin/users/${tenant._id}`);
+          if (stale()) return;
+          nextUsers = data.users || [];
+          if (nextUser && !nextUsers.some((user) => String(user._id) === nextUser)) {
+            setPlatformKey("");
+            setTId("");
+            setTenants([]);
+            setError("That user is not in this tenant, so nothing was selected.");
+            writtenQuery.current = queryKey;
+            return;
+          }
+        }
+        setUsers(nextUsers);
+        setUserId(nextUser);
+        writtenQuery.current = queryKey;
+        await loadOverviewRef.current(nextPlatform, nextTenant, nextUser);
+      } catch (err) {
+        if (!stale()) {
+          setPlatformKey("");
+          setTId("");
+          setUserId("");
+          setTenants([]);
+          setUsers([]);
+          setSelectedTier("");
+          setSelectedAddon("");
+          writtenQuery.current = queryKey;
+          setError(err instanceof Error ? err.message : "Could not open this assignment");
+        }
+      } finally {
+        if (!stale()) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, queryKey]);
+
   const onPlatform = async (value: string) => {
+    replaceScopeUrl(value, "", "");
     setPlatformKey(value);
     setTId("");
     setUserId("");
@@ -384,6 +505,7 @@ export default function TiersPage() {
   };
 
   const onTenant = async (value: string) => {
+    replaceScopeUrl(platformKey, value, "");
     setTId(value);
     setUserId("");
     setUsers([]);
@@ -418,6 +540,7 @@ export default function TiersPage() {
   };
 
   const onUser = async (value: string) => {
+    replaceScopeUrl(platformKey, tId, value);
     setUserId(value);
     setSelectedTier("");
     setSelectedAddon("");
@@ -453,27 +576,44 @@ export default function TiersPage() {
   };
 
   const assign = async (tierKey: string) => {
-    if (!platformKey || !tierKey) return;
+    if (!platformKey || !tierKey || loading) return;
+    if (userId && !tId) {
+      setError("Choose the tenant before assigning a user.");
+      return;
+    }
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      const saved = await post<{ replaced?: string[] }>("/admin/tiers/entitlements", {
+      const saved = await post<{
+        replaced?: string[];
+        updated?: boolean;
+        unchanged?: boolean;
+        endsAt?: number | null;
+      }>("/admin/tiers/entitlements", {
         platformKey,
         tId: tId || undefined,
         userId: userId || undefined,
         tierKey,
-        startsAt: startOfUtcDay(startsOn || todayInput()),
-        endsAt: endsOn ? endOfUtcDay(endsOn) : undefined,
+        startsAt: startOfIstDay(startsOn || todayInput(timeZone), timeZone),
+        endsAt: endsOn ? endOfIstDay(endsOn, timeZone) : undefined,
         source,
       });
       const name = tiers.find((tier) => tier.key === tierKey)?.name || tierKey;
       const replaced = saved.replaced || [];
-      setNotice(
-        replaced.length
-          ? `${name} is now the plan. ${replaced.join(", ")} ${replaced.length === 1 ? "is" : "are"} no longer in force at this level.`
-          : `${name} saved as its own grant.`,
-      );
+      const until = saved.endsAt ? formatWhen(saved.endsAt, timeZone) : "it is cancelled";
+      const replacedNote = replaced.length
+        ? ` ${replaced.join(", ")} ${replaced.length === 1 ? "is" : "are"} no longer in force at this level.`
+        : "";
+      if (saved.unchanged) {
+        setNotice(`${name} already runs until ${until}.`);
+      } else if (saved.updated) {
+        setNotice(`${name} keeps the same grant. It now runs until ${until}.${replacedNote}`);
+      } else if (replaced.length) {
+        setNotice(`${name} is now the plan.${replacedNote}`);
+      } else {
+        setNotice(`${name} saved as its own grant.`);
+      }
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Assignment failed");
@@ -575,6 +715,60 @@ export default function TiersPage() {
     }
   };
 
+  const reducePolicy = async () => {
+    if (!platformKey) return;
+    const saved = tId ? overview?.policies.tenant : overview?.policies.platform;
+    const days = Number(extendDays);
+    if (!saved) {
+      setError("Save a trial before shortening it.");
+      return;
+    }
+    if (!days || days < 1) {
+      setError("Reduce by at least one day.");
+      return;
+    }
+    if (saved.durationDays - days < 1) {
+      setError("A trial has to keep at least one day. Cancel it to stop it.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await post("/admin/tiers/policies/reduce", {
+        platformKey,
+        tId: tId || undefined,
+        days,
+      });
+      setNotice(
+        tId ? `Tenant trial reduced by ${days} days.` : `Platform trial reduced by ${days} days.`,
+      );
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not shorten the trial");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancelPolicy = async () => {
+    if (!platformKey) return;
+    setBusy(true);
+    setError("");
+    try {
+      await post("/admin/tiers/policies/cancel", {
+        platformKey,
+        tId: tId || undefined,
+      });
+      setNotice(tId ? "Tenant trial cancelled." : "Platform trial cancelled.");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not cancel the trial");
+    } finally {
+      setBusy(false);
+      setPendingTrialCancel(false);
+    }
+  };
+
   const extendAssignment = async (row: Entitlement) => {
     const days = Number(extendDays);
     if (!days || days < 1) {
@@ -589,6 +783,25 @@ export default function TiersPage() {
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not extend the trial grant");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reduceAssignment = async (row: Entitlement) => {
+    const days = Number(extendDays);
+    if (!days || days < 1) {
+      setError("Reduce by at least one day.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await post(`/admin/tiers/entitlements/${row.id}/reduce`, { days });
+      setNotice(`Trial grant reduced by ${days} days.`);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not shorten the trial grant");
     } finally {
       setBusy(false);
     }
@@ -621,6 +834,11 @@ export default function TiersPage() {
         : `Platform · ${overview?.context.platform?.name || platformKey}`;
 
   const exactScope: Entitlement["scope"] = userId ? "user" : tId ? "tenant" : "platform";
+  const activeAtThisLevel = (key: string) =>
+    Boolean(key) &&
+    (overview?.entitlements || []).some(
+      (row) => row.status === "active" && row.scope === exactScope && row.tierKey === key,
+    );
   const ownInForce = (overview?.entitlements || []).some(
     (row) => row.inForce && row.scope === exactScope,
   );
@@ -633,8 +851,9 @@ export default function TiersPage() {
         (row) => row.inForce && row.scope === "platform" && exactScope !== "platform",
       );
   const rows = (overview?.entitlements || []).filter((row) => {
-    if (listMode === "applies" || row.scope === exactScope) return true;
-    return Boolean(higherGrant) && row.inForce && row.scope !== exactScope;
+    if (listMode !== "applies" && row.scope !== exactScope) return false;
+    if (levelFilter !== "all" && row.scope !== levelFilter) return false;
+    return true;
   });
   const levelName = exactScope === "user" ? "user" : "tenant";
   const higherName = higherGrant?.scope === "tenant" ? "tenant" : "platform";
@@ -691,21 +910,45 @@ export default function TiersPage() {
       title="Tiers"
       subtitle="Assign a plan, and an add-on beside it when one extra feature is needed. Each one is its own grant."
       actions={
-        <Button variant="outline" onClick={importCatalog} loading={busy}>
-          Load catalog
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={ROUTES.TIER_ASSIGNMENTS}
+            className="inline-flex items-center justify-center rounded-md border border-transparent bg-[#1f00a3] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#1a0088]"
+          >
+            View assignments
+          </Link>
+          <Button variant="outline" onClick={importCatalog} loading={busy}>
+            Load catalog
+          </Button>
+        </div>
       }
     >
       <div className="space-y-6">
-        {error && (
-          <Alert variant="error" dismissible onDismiss={() => setError("")}>
-            {error}
-          </Alert>
-        )}
-        {notice && (
-          <Alert variant="success" dismissible onDismiss={() => setNotice("")}>
-            {notice}
-          </Alert>
+        {(error || notice) && (
+          <FloatingAlerts>
+            {error && (
+              <Alert
+                variant="error"
+                dismissible
+                className="shadow-lg"
+                onDismiss={() => setError("")}
+              >
+                {error}
+              </Alert>
+            )}
+            {notice && (
+              <Alert
+                key={notice}
+                variant="success"
+                duration={5}
+                dismissible
+                className="shadow-lg"
+                onDismiss={() => setNotice("")}
+              >
+                {notice}
+              </Alert>
+            )}
+          </FloatingAlerts>
         )}
         {!catalogReady && (
           <Alert variant="warning">
@@ -1046,7 +1289,7 @@ export default function TiersPage() {
           <CardContent>
             <p className="mb-4 text-sm text-gray-600">
               {platformKey
-                ? `Each button writes a grant for ${scopeLabel}. A new plan replaces the other plan at this level. An add-on stays beside the plan.`
+                ? `Each button writes a grant for ${scopeLabel}. Assigning a tier that is already active here updates that grant's end date. A new plan replaces the other plan at this level. An add-on stays beside the plan.`
                 : "Select a platform, then a plan. An add-on can be saved beside it as a second grant."}
             </p>
             <div className="grid gap-4 md:grid-cols-3">
@@ -1061,7 +1304,7 @@ export default function TiersPage() {
                 type="date"
                 value={endsOn}
                 onChange={(event) => setEndsOn(event.target.value)}
-                helperText="Leave empty to keep it until cancelled."
+                helperText={`Dates use ${timeZone}. Leave empty to keep it until cancelled. A date ends at 23:59.`}
               />
               <label className="space-y-1 text-sm">
                 <span className="block font-medium text-gray-700">Source</span>
@@ -1080,19 +1323,27 @@ export default function TiersPage() {
             </div>
             <div className="mt-4 flex flex-wrap gap-3">
               <Button
-                disabled={!platformKey || !selectedTier}
+                disabled={loading || !platformKey || !selectedTier}
                 loading={busy}
                 onClick={() => assign(selectedTier)}
               >
-                {selectedPlan ? `Assign ${selectedPlan.name}` : "Assign plan"}
+                {selectedPlan
+                  ? activeAtThisLevel(selectedTier)
+                    ? `Update ${selectedPlan.name} end date`
+                    : `Assign ${selectedPlan.name}`
+                  : "Assign plan"}
               </Button>
               <Button
                 variant="outline"
-                disabled={!platformKey || !selectedAddon}
+                disabled={loading || !platformKey || !selectedAddon}
                 loading={busy}
                 onClick={() => assign(selectedAddon)}
               >
-                {selectedAddonTier ? `Assign ${selectedAddonTier.name}` : "Assign add-on"}
+                {selectedAddonTier
+                  ? activeAtThisLevel(selectedAddon)
+                    ? `Update ${selectedAddonTier.name} end date`
+                    : `Assign ${selectedAddonTier.name}`
+                  : "Assign add-on"}
               </Button>
             </div>
           </CardContent>
@@ -1137,19 +1388,24 @@ export default function TiersPage() {
             {!platformKey && (
               <p className="text-sm text-gray-600">Select a platform to see grants.</p>
             )}
-            {platformKey && higherGrant && (
+            {platformKey && listMode === "applies" && higherGrant && (
               <p className="mb-3 text-sm text-gray-600">
                 Nothing is assigned to this {levelName}. The {higherName} grant is listed because it
                 still applies.
               </p>
             )}
-            {platformKey && rows.length === 0 && !usingDefault && (
+            {platformKey && (
+              <div className="mb-3">
+                <LevelFilter value={levelFilter} onChange={setLevelFilter} />
+              </div>
+            )}
+            {platformKey && rows.length === 0 && !(usingDefault && levelFilter === "all") && (
               <p className="text-sm text-gray-600">No grants in this view.</p>
             )}
-            {(rows.length > 0 || (platformKey && usingDefault)) && (
-              <div className="overflow-x-auto">
+            {(rows.length > 0 || (platformKey && usingDefault && levelFilter === "all")) && (
+              <div className="max-h-80 overflow-auto">
                 <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead>
+                  <thead className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(229,231,235)]">
                     <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
                       <th className="px-3 py-2">Scope</th>
                       <th className="px-3 py-2">Tier</th>
@@ -1161,8 +1417,8 @@ export default function TiersPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {usingDefault && (
-                      <tr>
+                    {usingDefault && levelFilter === "all" && (
+                      <tr className="bg-gray-50">
                         <td className="px-3 py-3">Everyone</td>
                         <td className="px-3 py-3">Base</td>
                         <td className="px-3 py-3">—</td>
@@ -1173,13 +1429,27 @@ export default function TiersPage() {
                       </tr>
                     )}
                     {rows.map((row) => (
-                      <tr key={row.id}>
-                        <td className="px-3 py-3 capitalize">{row.scope}</td>
+                      <tr
+                        key={row.id}
+                        className={
+                          row.scope === "user"
+                            ? "bg-emerald-50"
+                            : row.scope === "tenant"
+                              ? "bg-sky-50"
+                              : "bg-violet-50"
+                        }
+                      >
+                        <td className="px-3 py-3">
+                          <div className="capitalize">{row.scope}</div>
+                          {row.assigneeName && (
+                            <div className="text-xs text-gray-500">{row.assigneeName}</div>
+                          )}
+                        </td>
                         <td className="px-3 py-3">
                           {tierByKey.get(row.tierKey)?.name || row.tierKey}
                         </td>
-                        <td className="px-3 py-3">{formatWhen(row.startsAt)}</td>
-                        <td className="px-3 py-3">{formatWhen(row.endsAt)}</td>
+                        <td className="px-3 py-3">{formatWhen(row.startsAt, timeZone)}</td>
+                        <td className="px-3 py-3">{formatWhen(row.endsAt, timeZone)}</td>
                         <td className="px-3 py-3 capitalize">{row.source}</td>
                         <td className="px-3 py-3">
                           <span className={row.inForce ? "text-green-700" : "text-gray-500"}>
@@ -1205,13 +1475,24 @@ export default function TiersPage() {
                               History
                             </Button>
                             {row.status === "active" && row.source === "trial" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => extendAssignment(row)}
-                              >
-                                Extend
-                              </Button>
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={busy}
+                                  onClick={() => extendAssignment(row)}
+                                >
+                                  Extend
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={busy || !row.endsAt}
+                                  onClick={() => reduceAssignment(row)}
+                                >
+                                  Reduce
+                                </Button>
+                              </>
                             )}
                             {row.status === "active" && (
                               <Button
@@ -1241,10 +1522,14 @@ export default function TiersPage() {
                 {platformKey && (
                   <span
                     className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${
-                      ownTrial ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"
+                      ownTrial?.active
+                        ? "bg-green-100 text-green-800"
+                        : ownTrial
+                          ? "bg-amber-100 text-amber-800"
+                          : "bg-gray-100 text-gray-600"
                     }`}
                   >
-                    {ownTrial ? "Saved" : "Not saved"}
+                    {ownTrial?.active ? "Saved" : ownTrial ? "Cancelled" : "Not saved"}
                   </span>
                 )}
                 <Button
@@ -1268,16 +1553,26 @@ export default function TiersPage() {
               {!platformKey && "Select a platform to see its trial."}
               {platformKey &&
                 !tId &&
-                ownTrial &&
+                ownTrial?.active &&
                 "This platform trial is saved. It applies to every tenant that does not have its own trial."}
+              {platformKey &&
+                !tId &&
+                ownTrial &&
+                !ownTrial.active &&
+                "This platform trial is cancelled. It does not apply until it is saved as active again."}
               {platformKey &&
                 !tId &&
                 !ownTrial &&
                 "No platform trial is saved yet. These are the defaults."}
               {platformKey &&
                 tId &&
-                ownTrial &&
+                ownTrial?.active &&
                 "A trial is saved for this tenant. It replaces the platform trial. A user selection still uses this tenant trial."}
+              {platformKey &&
+                tId &&
+                ownTrial &&
+                !ownTrial.active &&
+                "This tenant trial is cancelled. The platform trial applies again while this one stays off."}
               {platformKey &&
                 tId &&
                 !ownTrial &&
@@ -1347,12 +1642,20 @@ export default function TiersPage() {
               Policy is active
             </label>
             <div className="mt-4 flex flex-wrap items-end gap-3">
-              <Button disabled={!platformKey} loading={busy} onClick={savePolicy}>
+              <Button disabled={loading || !platformKey} loading={busy} onClick={savePolicy}>
                 Save trial
+              </Button>
+              <Button
+                variant="outline"
+                className="!border-red-200 !text-red-700 hover:!bg-red-50"
+                disabled={!platformKey || !ownTrial?.active || busy}
+                onClick={() => setPendingTrialCancel(true)}
+              >
+                Cancel trial
               </Button>
               <div className="w-28">
                 <Input
-                  label="Extend by"
+                  label="Days"
                   type="number"
                   min={1}
                   value={extendDays}
@@ -1366,14 +1669,59 @@ export default function TiersPage() {
               >
                 Extend trial
               </Button>
+              <Button
+                variant="outline"
+                disabled={!platformKey || !ownTrial || ownTrial.durationDays <= 1 || busy}
+                onClick={reducePolicy}
+              >
+                Reduce trial
+              </Button>
             </div>
             <p className="mt-2 text-xs text-gray-500">
-              Extend adds these days to the saved trial. A trial grant in Assignments uses the same
-              day count. Open History to see the earlier length.
+              Extend adds these days to the saved trial. Reduce takes them off and leaves at least
+              one day. Cancel stops the trial, and saving it as active turns it back on. A trial
+              grant in Assignments uses the same day count.
             </p>
           </CardContent>
         </Card>
       </div>
+      {pendingTrialCancel && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
+          onClick={() => !busy && setPendingTrialCancel(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-lg bg-white p-5 shadow-lg"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-label="Cancel trial"
+          >
+            <h3 className="text-lg font-semibold text-gray-900">
+              Cancel this {tId ? "tenant" : "platform"} trial?
+            </h3>
+            <p className="mt-2 text-sm text-gray-600">
+              It stops applying. The saved length and tiers stay, so it can be turned on again by
+              saving it as active.
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => setPendingTrialCancel(false)}
+              >
+                Keep trial
+              </Button>
+              <Button
+                className="!bg-red-600 !text-white hover:!bg-red-700"
+                loading={busy}
+                onClick={cancelPolicy}
+              >
+                Cancel trial
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       {pendingCancel && (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center"
@@ -1476,7 +1824,7 @@ export default function TiersPage() {
                     {visibleHistory.map((event) => (
                       <tr key={event.id}>
                         <td className="px-3 py-3 whitespace-nowrap">
-                          {formatWhenWithTime(event.at)}
+                          {formatWhenWithTime(event.at, timeZone)}
                         </td>
                         <td className="px-3 py-3">{historyScopeLabel(event)}</td>
                         <td className="px-3 py-3 capitalize">{event.action}</td>
@@ -1491,5 +1839,19 @@ export default function TiersPage() {
         </div>
       )}
     </Layout>
+  );
+}
+
+export default function TiersPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <Loader />
+        </div>
+      }
+    >
+      <TiersPageContent />
+    </Suspense>
   );
 }

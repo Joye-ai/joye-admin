@@ -5,7 +5,16 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Layout } from "@/components/layout";
-import { Alert, Button, Card, CardContent, CardHeader, CardTitle, Input } from "@/components/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  FloatingAlerts,
+  Input,
+} from "@/components/ui";
 import { ROUTES } from "@/constants";
 import { del, get, post } from "@/helpers/api";
 import { useAppSelector } from "@/store";
@@ -262,15 +271,31 @@ export default function ManageTiersPage() {
       }
     >
       <div className="space-y-4">
-        {error && (
-          <Alert variant="error" dismissible onDismiss={() => setError("")}>
-            {error}
-          </Alert>
-        )}
-        {notice && (
-          <Alert variant="success" dismissible onDismiss={() => setNotice("")}>
-            {notice}
-          </Alert>
+        {(error || notice) && (
+          <FloatingAlerts>
+            {error && (
+              <Alert
+                variant="error"
+                dismissible
+                className="shadow-lg"
+                onDismiss={() => setError("")}
+              >
+                {error}
+              </Alert>
+            )}
+            {notice && (
+              <Alert
+                key={notice}
+                variant="success"
+                duration={5}
+                dismissible
+                className="shadow-lg"
+                onDismiss={() => setNotice("")}
+              >
+                {notice}
+              </Alert>
+            )}
+          </FloatingAlerts>
         )}
 
         <div className="grid items-start gap-4 lg:grid-cols-[300px_1fr]">
