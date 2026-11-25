@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 export interface AlertProps {
   /**
@@ -98,6 +98,14 @@ const dismissIcon = (
   />
 );
 
+export const FloatingAlerts = ({ children }: { children: React.ReactNode }) => {
+  return (
+    <div className="pointer-events-none fixed inset-x-0 top-20 z-40 flex justify-center px-4">
+      <div className="pointer-events-auto flex w-full max-w-2xl flex-col gap-2">{children}</div>
+    </div>
+  );
+};
+
 export const Alert: React.FC<AlertProps> = ({
   children,
   variant = "info",
@@ -109,18 +117,17 @@ export const Alert: React.FC<AlertProps> = ({
 }) => {
   const [isVisible, setIsVisible] = useState(true);
   const styles = variantStyles[variant];
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
 
-  // Handle auto-dismissal
   useEffect(() => {
-    if (duration && duration > 0) {
-      const timer = setTimeout(() => {
-        setIsVisible(false);
-        onDismiss?.();
-      }, duration * 1000);
-
-      return () => clearTimeout(timer);
-    }
-  }, [duration, onDismiss]);
+    if (!duration || duration <= 0) return;
+    const timer = setTimeout(() => {
+      setIsVisible(false);
+      onDismissRef.current?.();
+    }, duration * 1000);
+    return () => clearTimeout(timer);
+  }, [duration]);
 
   // Handle manual dismissal
   const handleDismiss = () => {
