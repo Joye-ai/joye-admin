@@ -968,20 +968,21 @@ export default function WellbeingAnalyticsPage() {
     if (!driverRows.length) return null;
     const drivers: Record<string, { avgScore: number | null; usersWithData: number }> = {};
     for (const key of DRIVER_ORDER) {
+      // Weighted avg = Σ(avgScore × usersWithData) / Σ(usersWithData)
+      // Same method as Brew total and 4-category Total.
       let scoreWeighted = 0;
-      let scoreUsers = 0;
       let usersWithData = 0;
       for (const row of driverRows) {
         const metric = row.drivers[key];
         if (!metric) continue;
-        usersWithData += metric.usersWithData || 0;
-        if (metric.avgScore != null && metric.usersWithData > 0) {
-          scoreWeighted += metric.avgScore * metric.usersWithData;
-          scoreUsers += metric.usersWithData;
+        const count = metric.usersWithData || 0;
+        usersWithData += count;
+        if (metric.avgScore != null && count > 0) {
+          scoreWeighted += metric.avgScore * count;
         }
       }
       drivers[key] = {
-        avgScore: scoreUsers > 0 ? Number((scoreWeighted / scoreUsers).toFixed(2)) : null,
+        avgScore: usersWithData > 0 ? Number((scoreWeighted / usersWithData).toFixed(2)) : null,
         usersWithData,
       };
     }
@@ -1001,25 +1002,26 @@ export default function WellbeingAnalyticsPage() {
       { avgScore: number | null; usersWithData: number; pctAtOrAboveThreshold: number | null }
     > = {};
     for (const key of CATEGORY_ORDER) {
+      // Weighted avg = Σ(avgScore × usersWithData) / Σ(usersWithData)
+      // Same method as Brew total: Σ(Brew × Brew Count) / Σ(Brew Count).
       let scoreWeighted = 0;
-      let scoreUsers = 0;
       let usersWithData = 0;
       let atOrAbove = 0;
       for (const row of categoryRows) {
         const metric = row.categories[key];
         if (!metric) continue;
-        usersWithData += metric.usersWithData || 0;
+        const count = metric.usersWithData || 0;
+        usersWithData += count;
         atOrAbove += metric.usersAtOrAboveThreshold || 0;
-        if (metric.avgScore != null && metric.usersWithData > 0) {
-          scoreWeighted += metric.avgScore * metric.usersWithData;
-          scoreUsers += metric.usersWithData;
+        if (metric.avgScore != null && count > 0) {
+          scoreWeighted += metric.avgScore * count;
         }
       }
       categories[key] = {
-        avgScore: scoreUsers > 0 ? Number((scoreWeighted / scoreUsers).toFixed(2)) : null,
+        avgScore: usersWithData > 0 ? Number((scoreWeighted / usersWithData).toFixed(2)) : null,
         usersWithData,
         pctAtOrAboveThreshold:
-          usersWithData >= 25 ? Number(((atOrAbove / usersWithData) * 100).toFixed(1)) : null,
+          usersWithData >= 10 ? Number(((atOrAbove / usersWithData) * 100).toFixed(1)) : null,
       };
     }
     const orgUsersByTid = new Map<string, number>();
@@ -2114,7 +2116,7 @@ export default function WellbeingAnalyticsPage() {
             <CardContent>
               <p className="mb-4 text-xs text-gray-500">
                 Negative: Burnout Risk, Stress. Positive: Belonging, Energy. Layer 1 needs ≥2 parent
-                components. % ≥7.0 hidden when assessed users &lt; 25 (Layer 2).
+                components. % ≥7.0 hidden when assessed users &lt; 10 (Layer 2).
               </p>
               <div className="overflow-x-auto max-h-[32rem]">
                 <table className="min-w-full divide-y divide-gray-200 text-sm">
