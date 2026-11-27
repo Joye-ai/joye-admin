@@ -22,6 +22,7 @@ export const API_ENDPOINTS = {
   PROMPTS: {
     PROMPTS_DATA: "/admin/prompts-data",
     PROMPT_UPDATE: "/admin/prompt-update",
+    PROMPT_RESET: "/admin/prompt-reset",
   },
 } as const;
 
