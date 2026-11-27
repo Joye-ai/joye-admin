@@ -874,10 +874,11 @@ function ZoneMeterGroup({
   );
 }
 
-type DashboardChartType = "type1" | "type2";
+type DashboardChartType = "type1a" | "type1b" | "type2";
 
 const CHART_TYPE_OPTIONS: Array<{ value: DashboardChartType; label: string }> = [
-  { value: "type1", label: "Type 1" },
+  { value: "type1a", label: "Type 1a" },
+  { value: "type1b", label: "Type 1b" },
   { value: "type2", label: "Type 2" },
 ];
 
@@ -895,8 +896,12 @@ export function WellbeingDashboard({
 }: Props) {
   const dashboardExportRef = useRef<HTMLDivElement>(null);
   const [exportingDashboard, setExportingDashboard] = useState(false);
-  const [chartType, setChartType] = useState<DashboardChartType>("type1");
-  const showMauActivePctAndEnabled = chartType === "type1";
+  const [chartType, setChartType] = useState<DashboardChartType>("type1a");
+  /** Type 1a/1b keep Active % + Enabled columns; Type 2 hides them. */
+  const showMauActivePctAndEnabled = chartType === "type1a" || chartType === "type1b";
+  /** Type 1a: Period + Lifetime. Type 1b: Lifetime only, labeled Total. Type 2: Period + Lifetime. */
+  const showMauPeriodRow = chartType !== "type1b";
+  const mauLifetimeLabel = chartType === "type1b" ? "Total" : "Lifetime";
   const [highlightsHtml, setHighlightsHtml] = useState("");
   const [highlightsEditing, setHighlightsEditing] = useState(false);
   const [highlightsColumns, setHighlightsColumns] = useState<HighlightsColumnCount>(1);
@@ -1476,7 +1481,7 @@ export function WellbeingDashboard({
                   </div>
                   <div className="relative pl-3">
                     <p className="absolute left-0 top-1/2 -translate-y-1/2 rotate-180 text-[8px] font-medium tracking-wide text-slate-500 [writing-mode:vertical-rl]">
-                      Lifetime
+                      {mauLifetimeLabel}
                     </p>
                     <div
                       className={`grid gap-x-1 ${showMauActivePctAndEnabled ? "grid-cols-5" : "grid-cols-3"}`}
@@ -1502,37 +1507,38 @@ export function WellbeingDashboard({
                       ) : null}
                     </div>
                   </div>
-                  {/* Selected months period stats */}
-                  <div className="relative mt-2.5 border-t border-slate-100 pt-2.5 pl-3">
-                    <p className="absolute left-0 top-1/2 -translate-y-1/2 rotate-180 text-[8px] font-medium tracking-wide text-slate-500 [writing-mode:vertical-rl]">
-                      Period
-                    </p>
-                    <div
-                      className={`grid gap-x-1 ${showMauActivePctAndEnabled ? "grid-cols-5" : "grid-cols-3"}`}
-                    >
-                      <p className="text-center font-bold tabular-nums">
-                        {selectedPeriodMau.active.toLocaleString()}
+                  {showMauPeriodRow ? (
+                    <div className="relative mt-2.5 border-t border-slate-100 pt-2.5 pl-3">
+                      <p className="absolute left-0 top-1/2 -translate-y-1/2 rotate-180 text-[8px] font-medium tracking-wide text-slate-500 [writing-mode:vertical-rl]">
+                        Period
                       </p>
-                      {showMauActivePctAndEnabled ? (
+                      <div
+                        className={`grid gap-x-1 ${showMauActivePctAndEnabled ? "grid-cols-5" : "grid-cols-3"}`}
+                      >
                         <p className="text-center font-bold tabular-nums">
-                          {selectedPeriodMau.pct == null ? "—" : `${selectedPeriodMau.pct}%`}
+                          {selectedPeriodMau.active.toLocaleString()}
                         </p>
-                      ) : null}
-                      <p className="text-center font-bold tabular-nums">
-                        {selectedPeriodMau.repeat.toLocaleString()}
-                      </p>
-                      <p className="text-center font-bold tabular-nums">
-                        {selectedPeriodMau.repeatPct == null
-                          ? "—"
-                          : `${selectedPeriodMau.repeatPct}%`}
-                      </p>
-                      {showMauActivePctAndEnabled ? (
+                        {showMauActivePctAndEnabled ? (
+                          <p className="text-center font-bold tabular-nums">
+                            {selectedPeriodMau.pct == null ? "—" : `${selectedPeriodMau.pct}%`}
+                          </p>
+                        ) : null}
                         <p className="text-center font-bold tabular-nums">
-                          {selectedPeriodMau.registered.toLocaleString()}
+                          {selectedPeriodMau.repeat.toLocaleString()}
                         </p>
-                      ) : null}
+                        <p className="text-center font-bold tabular-nums">
+                          {selectedPeriodMau.repeatPct == null
+                            ? "—"
+                            : `${selectedPeriodMau.repeatPct}%`}
+                        </p>
+                        {showMauActivePctAndEnabled ? (
+                          <p className="text-center font-bold tabular-nums">
+                            {selectedPeriodMau.registered.toLocaleString()}
+                          </p>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
+                  ) : null}
                 </div>
                 <AreaTrend points={mauSixMonthTrendPoints} />
               </Panel>
