@@ -151,7 +151,7 @@ function isAddonTier(tier?: { key: string; addon?: boolean } | null) {
 }
 
 function grantsForFilter(data: Overview, nextTenant: string, nextUser: string) {
-  const inForce = data.entitlements.filter((row) => row.inForce);
+  const now = Date.now();
   const scopes: Array<Entitlement["scope"]> = nextUser
     ? ["user", "tenant", "platform"]
     : nextTenant
@@ -161,27 +161,52 @@ function grantsForFilter(data: Overview, nextTenant: string, nextUser: string) {
     const tier = data.tiers.find((item) => item.key === key);
     return (tier?.expandedTierKeys.length || 0) * 1000 + (tier?.rank || 0);
   };
-  let plan: Entitlement | null = null;
-  const addons: Entitlement[] = [];
-  for (const scope of scopes) {
-    const matches = inForce.filter((row) => row.scope === scope);
-    const plans = matches.filter(
-      (row) =>
-        !isAddonTier(data.tiers.find((tier) => tier.key === row.tierKey) || { key: row.tierKey }),
-    );
-    if (!plan && plans.length) {
-      plans.sort(
+  const addonRow = (row: Entitlement) =>
+    isAddonTier(data.tiers.find((tier) => tier.key === row.tierKey) || { key: row.tierKey });
+  const pick = (plans: Entitlement[]) => {
+    for (const scope of scopes) {
+      const matches = plans.filter((row) => row.scope === scope);
+      if (!matches.length) continue;
+      matches.sort(
         (left, right) =>
           weight(right.tierKey) - weight(left.tierKey) ||
           (right.startsAt || 0) - (left.startsAt || 0),
       );
-      plan = plans[0];
+      return matches[0];
     }
-    addons.push(
-      ...matches.filter((row) =>
-        isAddonTier(data.tiers.find((tier) => tier.key === row.tierKey) || { key: row.tierKey }),
-      ),
+    return null;
+  };
+  const inForce = data.entitlements.filter((row) => row.inForce);
+  const plans = inForce.filter((row) => scopes.includes(row.scope) && !addonRow(row));
+  let plan: { tierKey: string } | null =
+    pick(plans.filter((row) => row.source !== "trial")) ||
+    pick(plans.filter((row) => row.source === "trial"));
+  const addons = inForce.filter((row) => scopes.includes(row.scope) && addonRow(row));
+  if (!plan) {
+    const trialEnded = data.entitlements.some(
+      (row) =>
+        row.source === "trial" &&
+        row.status === "active" &&
+        scopes.includes(row.scope) &&
+        !addonRow(row) &&
+        Boolean(row.endsAt && row.endsAt > 0 && row.endsAt <= now) &&
+        (!row.startsAt || row.startsAt <= now),
     );
+    const afterKeys = data.policies.effective?.postTrialTierKeys || [];
+    const isAfterAddon = (key: string) => {
+      const tier = data.tiers.find((item) => item.key === key);
+      return tier ? isAddonTier(tier) : key.endsWith("_addon");
+    };
+    const after = afterKeys.filter((key) => !isAfterAddon(key));
+    if (trialEnded && after.length) {
+      after.sort((left, right) => weight(right) - weight(left));
+      plan = { tierKey: after[0] };
+      afterKeys.filter(isAfterAddon).forEach((key) => {
+        if (!addons.some((row) => row.tierKey === key)) {
+          addons.push({ tierKey: key, status: "active" } as Entitlement);
+        }
+      });
+    }
   }
   return { plan, addons };
 }
