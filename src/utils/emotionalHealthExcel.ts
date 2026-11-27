@@ -20,6 +20,7 @@ export type EmotionalHealthCategoryExportRow = {
     {
       avgScore: number | null;
       usersWithData: number;
+      usersAtOrAboveThreshold: number;
       pctAtOrAboveThreshold: number | null;
     }
   >;
@@ -44,6 +45,7 @@ export type EmotionalHealthExcelInput = {
       {
         avgScore: number | null;
         usersWithData: number;
+        usersAtOrAboveThreshold: number;
         pctAtOrAboveThreshold: number | null;
       }
     >;
@@ -69,8 +71,8 @@ function autoFit(sheet: ExcelJS.Worksheet, columnCount: number): void {
   }
 }
 
-function cellNum(value: number | null | undefined): number | string {
-  if (value == null || Number.isNaN(value)) return "—";
+function cellNum(value: number | null | undefined): number {
+  if (value == null || Number.isNaN(value)) return 0;
   return value;
 }
 
@@ -145,6 +147,7 @@ function writeCategoriesSheet(workbook: ExcelJS.Workbook, input: EmotionalHealth
     ...input.categoryKeys.flatMap((key) => [
       `${input.categoryTitles[key] || key} Avg`,
       `${input.categoryTitles[key] || key} Users`,
+      `${input.categoryTitles[key] || key} Users ≥7`,
       `${input.categoryTitles[key] || key} % ≥7`,
     ]),
     "Org users",
@@ -166,6 +169,7 @@ function writeCategoriesSheet(workbook: ExcelJS.Workbook, input: EmotionalHealth
       const metric = input.categoryTotals.categories[key];
       totalValues.push(cellNum(metric?.avgScore));
       totalValues.push(cellNum(metric?.usersWithData));
+      totalValues.push(cellNum(metric?.usersAtOrAboveThreshold));
       totalValues.push(cellNum(metric?.pctAtOrAboveThreshold));
     }
     totalValues.push(cellNum(input.categoryTotals.orgUsers));
@@ -187,6 +191,7 @@ function writeCategoriesSheet(workbook: ExcelJS.Workbook, input: EmotionalHealth
       const metric = row.categories[key];
       values.push(cellNum(metric?.avgScore));
       values.push(cellNum(metric?.usersWithData));
+      values.push(cellNum(metric?.usersAtOrAboveThreshold));
       values.push(cellNum(metric?.pctAtOrAboveThreshold));
     }
     values.push(cellNum(row.userCount));
@@ -199,6 +204,15 @@ function writeCategoriesSheet(workbook: ExcelJS.Workbook, input: EmotionalHealth
   autoFit(sheet, headers.length);
 }
 
+/** Append 10 Indicators + 4 Indicators sheets onto an existing workbook. */
+export function appendEmotionalHealthSheets(
+  workbook: ExcelJS.Workbook,
+  input: EmotionalHealthExcelInput,
+): void {
+  writeDriversSheet(workbook, input);
+  writeCategoriesSheet(workbook, input);
+}
+
 /** Build a 2-sheet workbook (10 Indicators / 4 Indicators) and download. */
 export async function downloadEmotionalHealthExcel(
   input: EmotionalHealthExcelInput,
@@ -208,8 +222,7 @@ export async function downloadEmotionalHealthExcel(
   workbook.creator = "Joye Admin";
   workbook.created = new Date();
 
-  writeDriversSheet(workbook, input);
-  writeCategoriesSheet(workbook, input);
+  appendEmotionalHealthSheets(workbook, input);
 
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer as BlobPart], {

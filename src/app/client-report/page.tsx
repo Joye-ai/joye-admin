@@ -3,8 +3,8 @@
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { EmotionalHealthExportButton } from "@/components/client-report/EmotionalHealthExportButton";
 import { WellbeingDashboard } from "@/components/client-report/WellbeingDashboard";
+import { WellbeingMonthlyExportButton } from "@/components/client-report/WellbeingMonthlyExportButton";
 import { Layout } from "@/components/layout";
 import {
   Button,
@@ -19,7 +19,7 @@ import {
 import { ROUTES } from "@/constants";
 import { get, post } from "@/helpers/api";
 import { useAppSelector } from "@/store";
-import type { EmotionalHealthExcelInput } from "@/utils/emotionalHealthExcel";
+import type { WellbeingMonthlyExcelInput } from "@/utils/wellbeingMonthlyExcel";
 
 interface OrganizationOption {
   _id: string;
@@ -364,10 +364,10 @@ const monthsEndingAtByYear = (
 };
 
 const formatOrgNumber = (value?: number | null) =>
-  value == null || Number.isNaN(Number(value)) ? "—" : Number(value).toLocaleString();
+  value == null || Number.isNaN(Number(value)) ? "0" : Number(value).toLocaleString();
 
 const formatOrgPercent = (value?: number | null) =>
-  value == null || Number.isNaN(Number(value)) ? "—" : `${Math.trunc(Number(value))}%`;
+  value == null || Number.isNaN(Number(value)) ? "0%" : `${Math.trunc(Number(value))}%`;
 
 const statusClass = (status: string) => {
   switch (status) {
@@ -467,17 +467,17 @@ const TENANT_BATCH_SIZE = 25;
 const formatMonth = (month: number, year: number) => `${MONTH_LABELS[month - 1] || "—"} ${year}`;
 
 const formatMetric = (value: number | null | undefined) => {
-  if (value == null || Number.isNaN(value)) return "—";
+  if (value == null || Number.isNaN(value)) return "0.0";
   return Number(value).toFixed(1);
 };
 
 const formatPercent = (value: number | null | undefined) => {
-  if (value == null || Number.isNaN(value)) return "—";
+  if (value == null || Number.isNaN(value)) return "0.0%";
   return `${Number(value).toFixed(1)}%`;
 };
 
 const formatCount = (value: number | null | undefined) => {
-  if (value == null || Number.isNaN(value)) return "—";
+  if (value == null || Number.isNaN(value)) return "0";
   return String(Math.round(Number(value)));
 };
 
@@ -492,7 +492,7 @@ const COLUMN_INFO: Record<string, string> = {
     "Count-weighted average of Brew, Gratitude, and Mindful Minute: (brew×brewCount + gratitude×gratitudeCount + mm×mmCount) ÷ (brewCount+gratitudeCount+mmCount). Brew/Gratitude = mean of non-null values. Mindful Minute = (yes×8 + no×3 + maybe×5.5) ÷ (yes+no+maybe).",
   mm: "Mindful Minute value = mean of (yes×8 + no×3 + maybe×5.5) ÷ (yes+no+maybe) for rows with yes/no/maybe answers that month.",
   effectiveness:
-    "Effectiveness % = (count of Helpful) ÷ (Helpful + Not Helpful) × 100. From Feature_Feedback thumbs (likes / dislikes). Shown as — when there are no helpful/not-helpful responses that month.",
+    "Effectiveness % = (count of Helpful) ÷ (Helpful + Not Helpful) × 100. From Feature_Feedback thumbs (likes / dislikes). Shown as 0 when there are no helpful/not-helpful responses that month.",
   starRating:
     'Average in-app star rating for the month (1–5). From Feature_Feedback where feature = "app" (ChatStarRating / app rating UI). Not Brew session averages.',
   starRatingCount: "Count of in-app Feature_Feedback app star ratings (1–5) in the month.",
@@ -968,20 +968,21 @@ export default function WellbeingAnalyticsPage() {
     if (!driverRows.length) return null;
     const drivers: Record<string, { avgScore: number | null; usersWithData: number }> = {};
     for (const key of DRIVER_ORDER) {
+      // Weighted avg = Σ(avgScore × usersWithData) / Σ(usersWithData)
+      // Same method as Brew total and 4-category Total.
       let scoreWeighted = 0;
-      let scoreUsers = 0;
       let usersWithData = 0;
       for (const row of driverRows) {
         const metric = row.drivers[key];
         if (!metric) continue;
-        usersWithData += metric.usersWithData || 0;
-        if (metric.avgScore != null && metric.usersWithData > 0) {
-          scoreWeighted += metric.avgScore * metric.usersWithData;
-          scoreUsers += metric.usersWithData;
+        const count = metric.usersWithData || 0;
+        usersWithData += count;
+        if (metric.avgScore != null && count > 0) {
+          scoreWeighted += metric.avgScore * count;
         }
       }
       drivers[key] = {
-        avgScore: scoreUsers > 0 ? Number((scoreWeighted / scoreUsers).toFixed(2)) : null,
+        avgScore: usersWithData > 0 ? Number((scoreWeighted / usersWithData).toFixed(2)) : null,
         usersWithData,
       };
     }
@@ -998,28 +999,35 @@ export default function WellbeingAnalyticsPage() {
     if (!categoryRows.length) return null;
     const categories: Record<
       string,
-      { avgScore: number | null; usersWithData: number; pctAtOrAboveThreshold: number | null }
+      {
+        avgScore: number | null;
+        usersWithData: number;
+        usersAtOrAboveThreshold: number;
+        pctAtOrAboveThreshold: number | null;
+      }
     > = {};
     for (const key of CATEGORY_ORDER) {
+      // Weighted avg = Σ(avgScore × usersWithData) / Σ(usersWithData)
+      // Same method as Brew total: Σ(Brew × Brew Count) / Σ(Brew Count).
       let scoreWeighted = 0;
-      let scoreUsers = 0;
       let usersWithData = 0;
       let atOrAbove = 0;
       for (const row of categoryRows) {
         const metric = row.categories[key];
         if (!metric) continue;
-        usersWithData += metric.usersWithData || 0;
+        const count = metric.usersWithData || 0;
+        usersWithData += count;
         atOrAbove += metric.usersAtOrAboveThreshold || 0;
-        if (metric.avgScore != null && metric.usersWithData > 0) {
-          scoreWeighted += metric.avgScore * metric.usersWithData;
-          scoreUsers += metric.usersWithData;
+        if (metric.avgScore != null && count > 0) {
+          scoreWeighted += metric.avgScore * count;
         }
       }
       categories[key] = {
-        avgScore: scoreUsers > 0 ? Number((scoreWeighted / scoreUsers).toFixed(2)) : null,
+        avgScore: usersWithData > 0 ? Number((scoreWeighted / usersWithData).toFixed(2)) : null,
         usersWithData,
+        usersAtOrAboveThreshold: atOrAbove,
         pctAtOrAboveThreshold:
-          usersWithData >= 25 ? Number(((atOrAbove / usersWithData) * 100).toFixed(1)) : null,
+          usersWithData >= 10 ? Number(((atOrAbove / usersWithData) * 100).toFixed(1)) : null,
       };
     }
     const orgUsersByTid = new Map<string, number>();
@@ -1031,53 +1039,75 @@ export default function WellbeingAnalyticsPage() {
     return { categories, orgUsers };
   }, [categoryRows]);
 
-  const getEmotionalHealthExcelPayload = useCallback((): EmotionalHealthExcelInput => {
+  const getWellbeingMonthlyExcelPayload = useCallback((): WellbeingMonthlyExcelInput => {
     const stamp = new Date().toISOString().slice(0, 10);
+    const hasEmotionalHealth = driverRows.length > 0 || categoryRows.length > 0;
     return {
-      fileName: `emotional-health-${platform || "export"}-${year || currentYear}-${stamp}.xlsx`,
-      driverKeys: DRIVER_ORDER,
-      driverTitles: DRIVER_TITLES,
-      driverRows: driverRows.map((row) => ({
-        platformKey: row.platformKey,
+      fileName: `org-monthly-${platform || "export"}-${year || currentYear}-${stamp}.xlsx`,
+      rows: tableRows.map((row) => ({
         orgName: row.orgName,
         tId: row.tId,
         monthLabel: formatMonth(row.month, row.year),
-        userCount: row.userCount,
-        drivers: Object.fromEntries(
-          DRIVER_ORDER.map((key) => [
-            key,
-            {
-              avgScore: row.drivers[key]?.avgScore ?? null,
-              usersWithData: row.drivers[key]?.usersWithData ?? 0,
-            },
-          ]),
-        ),
+        wellbeingIndex: row.wellbeingIndex,
       })),
-      driverTotals: driverTableTotals,
-      categoryKeys: CATEGORY_ORDER,
-      categoryTitles: CATEGORY_TITLES,
-      categoryRows: categoryRows.map((row) => ({
-        platformKey: row.platformKey,
-        orgName: row.orgName,
-        tId: row.tId,
-        monthLabel: formatMonth(row.month, row.year),
-        userCount: row.userCount,
-        categories: Object.fromEntries(
-          CATEGORY_ORDER.map((key) => [
-            key,
-            {
-              avgScore: row.categories[key]?.avgScore ?? null,
-              usersWithData: row.categories[key]?.usersWithData ?? 0,
-              pctAtOrAboveThreshold: row.categories[key]?.pctAtOrAboveThreshold ?? null,
-            },
-          ]),
-        ),
-      })),
-      categoryTotals: categoryTableTotals,
+      totals: wellbeingTableTotals ? { wellbeingIndex: wellbeingTableTotals.wellbeingIndex } : null,
+      emotionalHealth: hasEmotionalHealth
+        ? {
+            driverKeys: DRIVER_ORDER,
+            driverTitles: DRIVER_TITLES,
+            driverRows: driverRows.map((row) => ({
+              platformKey: row.platformKey,
+              orgName: row.orgName,
+              tId: row.tId,
+              monthLabel: formatMonth(row.month, row.year),
+              userCount: row.userCount,
+              drivers: Object.fromEntries(
+                DRIVER_ORDER.map((key) => [
+                  key,
+                  {
+                    avgScore: row.drivers[key]?.avgScore ?? null,
+                    usersWithData: row.drivers[key]?.usersWithData ?? 0,
+                  },
+                ]),
+              ),
+            })),
+            driverTotals: driverTableTotals,
+            categoryKeys: CATEGORY_ORDER,
+            categoryTitles: CATEGORY_TITLES,
+            categoryRows: categoryRows.map((row) => ({
+              platformKey: row.platformKey,
+              orgName: row.orgName,
+              tId: row.tId,
+              monthLabel: formatMonth(row.month, row.year),
+              userCount: row.userCount,
+              categories: Object.fromEntries(
+                CATEGORY_ORDER.map((key) => [
+                  key,
+                  {
+                    avgScore: row.categories[key]?.avgScore ?? null,
+                    usersWithData: row.categories[key]?.usersWithData ?? 0,
+                    usersAtOrAboveThreshold: row.categories[key]?.usersAtOrAboveThreshold ?? 0,
+                    pctAtOrAboveThreshold: row.categories[key]?.pctAtOrAboveThreshold ?? null,
+                  },
+                ]),
+              ),
+            })),
+            categoryTotals: categoryTableTotals,
+          }
+        : null,
     };
-  }, [platform, year, driverRows, driverTableTotals, categoryRows, categoryTableTotals]);
+  }, [
+    platform,
+    year,
+    tableRows,
+    wellbeingTableTotals,
+    driverRows,
+    driverTableTotals,
+    categoryRows,
+    categoryTableTotals,
+  ]);
 
-  const handleEmotionalHealthExportError = useCallback((message: string) => {
+  const handleWellbeingMonthlyExportError = useCallback((message: string) => {
     setError(message);
   }, []);
 
@@ -1176,7 +1206,15 @@ export default function WellbeingAnalyticsPage() {
 
   const formatOrgSummaryCell = (key: string, value: string | number | null) => {
     if (key === "status" && typeof value === "string") return value;
-    if (value == null || value === "") return "—";
+    if (key === "orgName" || key === "tId" || key === "status") {
+      if (value == null || value === "") return "—";
+      return String(value);
+    }
+    if (value == null || value === "") {
+      if (SUMMARY_PERCENT_KEYS.has(key)) return formatOrgPercent(0);
+      if (key === "activityPerUser") return "0.00";
+      return formatOrgNumber(0);
+    }
     if (typeof value === "string") return value;
     if (SUMMARY_PERCENT_KEYS.has(key)) return formatOrgPercent(value);
     if (key === "activityPerUser") return Number(value).toFixed(2);
@@ -1767,7 +1805,16 @@ export default function WellbeingAnalyticsPage() {
         {hasLoaded && (
           <Card>
             <CardHeader>
-              <CardTitle>Organization monthly metrics</CardTitle>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <CardTitle>Organization monthly metrics</CardTitle>
+                <WellbeingMonthlyExportButton
+                  disabled={
+                    tableRows.length === 0 && driverRows.length === 0 && categoryRows.length === 0
+                  }
+                  getPayload={getWellbeingMonthlyExcelPayload}
+                  onError={handleWellbeingMonthlyExportError}
+                />
+              </div>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto max-h-[32rem]">
@@ -1950,16 +1997,7 @@ export default function WellbeingAnalyticsPage() {
         {hasLoaded && (
           <Card>
             <CardHeader>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <CardTitle>
-                  Emotional health — organization monthly metrics (10 indicators)
-                </CardTitle>
-                <EmotionalHealthExportButton
-                  disabled={driverRows.length === 0 && categoryRows.length === 0}
-                  getPayload={getEmotionalHealthExcelPayload}
-                  onError={handleEmotionalHealthExportError}
-                />
-              </div>
+              <CardTitle>Emotional health — organization monthly metrics (10 indicators)</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto max-h-[32rem]">
@@ -2027,12 +2065,14 @@ export default function WellbeingAnalyticsPage() {
                           return (
                             <Fragment key={`thead-total-driver-${key}`}>
                               <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
-                                {metric?.avgScore == null || Number.isNaN(metric.avgScore)
-                                  ? "—"
-                                  : Number(metric.avgScore).toFixed(2)}
+                                {Number(
+                                  metric?.avgScore == null || Number.isNaN(metric.avgScore)
+                                    ? 0
+                                    : metric.avgScore,
+                                ).toFixed(2)}
                               </th>
                               <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
-                                {formatCount(metric?.usersWithData)}
+                                {formatCount(metric?.usersWithData ?? 0)}
                               </th>
                             </Fragment>
                           );
@@ -2075,12 +2115,14 @@ export default function WellbeingAnalyticsPage() {
                               return (
                                 <Fragment key={`${row.id}-${key}`}>
                                   <td className="whitespace-nowrap px-3 py-2 text-gray-900">
-                                    {metric?.avgScore == null || Number.isNaN(metric.avgScore)
-                                      ? "—"
-                                      : Number(metric.avgScore).toFixed(2)}
+                                    {Number(
+                                      metric?.avgScore == null || Number.isNaN(metric.avgScore)
+                                        ? 0
+                                        : metric.avgScore,
+                                    ).toFixed(2)}
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 text-gray-900">
-                                    {formatCount(metric?.usersWithData)}
+                                    {formatCount(metric?.usersWithData ?? 0)}
                                   </td>
                                 </Fragment>
                               );
@@ -2102,19 +2144,12 @@ export default function WellbeingAnalyticsPage() {
         {hasLoaded && (
           <Card>
             <CardHeader>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <CardTitle>Emotional health — category indicators (4)</CardTitle>
-                <EmotionalHealthExportButton
-                  disabled={driverRows.length === 0 && categoryRows.length === 0}
-                  getPayload={getEmotionalHealthExcelPayload}
-                  onError={handleEmotionalHealthExportError}
-                />
-              </div>
+              <CardTitle>Emotional health — category indicators (4)</CardTitle>
             </CardHeader>
             <CardContent>
               <p className="mb-4 text-xs text-gray-500">
                 Negative: Burnout Risk, Stress. Positive: Belonging, Energy. Layer 1 needs ≥2 parent
-                components. % ≥7.0 hidden when assessed users &lt; 25 (Layer 2).
+                components. % ≥7.0 hidden when assessed users &lt; 10 (Layer 2).
               </p>
               <div className="overflow-x-auto max-h-[32rem]">
                 <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -2136,7 +2171,7 @@ export default function WellbeingAnalyticsPage() {
                         <th
                           key={`${key}-score`}
                           className="whitespace-nowrap px-3 py-2 text-left text-xs font-semibold text-gray-700"
-                          colSpan={3}
+                          colSpan={4}
                         >
                           {CATEGORY_TITLES[key]}
                           <span className="ml-1 font-normal text-gray-400">
@@ -2160,6 +2195,9 @@ export default function WellbeingAnalyticsPage() {
                           </th>
                           <th className="whitespace-nowrap px-3 py-1 text-left text-[10px] font-medium text-gray-500">
                             Users
+                          </th>
+                          <th className="whitespace-nowrap px-3 py-1 text-left text-[10px] font-medium text-gray-500">
+                            Users ≥7
                           </th>
                           <th className="whitespace-nowrap px-3 py-1 text-left text-[10px] font-medium text-gray-500">
                             % ≥7
@@ -2187,16 +2225,21 @@ export default function WellbeingAnalyticsPage() {
                           return (
                             <Fragment key={`thead-total-category-${key}`}>
                               <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
-                                {metric?.avgScore == null || Number.isNaN(metric.avgScore)
-                                  ? "—"
-                                  : Number(metric.avgScore).toFixed(2)}
+                                {Number(
+                                  metric?.avgScore == null || Number.isNaN(metric.avgScore)
+                                    ? 0
+                                    : metric.avgScore,
+                                ).toFixed(2)}
                               </th>
                               <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
-                                {formatCount(metric?.usersWithData)}
+                                {formatCount(metric?.usersWithData ?? 0)}
+                              </th>
+                              <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
+                                {formatCount(metric?.usersAtOrAboveThreshold ?? 0)}
                               </th>
                               <th className="whitespace-nowrap px-3 py-2.5 text-left text-sm font-bold text-[#1f00a3]">
                                 {metric?.pctAtOrAboveThreshold == null
-                                  ? "—"
+                                  ? "0.0%"
                                   : `${Number(metric.pctAtOrAboveThreshold).toFixed(1)}%`}
                               </th>
                             </Fragment>
@@ -2212,7 +2255,7 @@ export default function WellbeingAnalyticsPage() {
                     {categoryRows.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={4 + CATEGORY_ORDER.length * 3 + 1}
+                          colSpan={4 + CATEGORY_ORDER.length * 4 + 1}
                           className="px-3 py-8 text-center text-gray-500"
                         >
                           No category rows for this selection
@@ -2240,16 +2283,21 @@ export default function WellbeingAnalyticsPage() {
                               return (
                                 <Fragment key={`${row.id}-${key}`}>
                                   <td className="whitespace-nowrap px-3 py-2 text-gray-900">
-                                    {metric?.avgScore == null || Number.isNaN(metric.avgScore)
-                                      ? "—"
-                                      : Number(metric.avgScore).toFixed(2)}
+                                    {Number(
+                                      metric?.avgScore == null || Number.isNaN(metric.avgScore)
+                                        ? 0
+                                        : metric.avgScore,
+                                    ).toFixed(2)}
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 text-gray-900">
-                                    {formatCount(metric?.usersWithData)}
+                                    {formatCount(metric?.usersWithData ?? 0)}
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 text-gray-900">
+                                    {formatCount(metric?.usersAtOrAboveThreshold ?? 0)}
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-2 text-gray-900">
                                     {metric?.suppressed || metric?.pctAtOrAboveThreshold == null
-                                      ? "—"
+                                      ? "0.0%"
                                       : `${Number(metric.pctAtOrAboveThreshold).toFixed(1)}%`}
                                   </td>
                                 </Fragment>
@@ -2457,7 +2505,7 @@ export default function WellbeingAnalyticsPage() {
                                       : undefined
                                   }
                                 >
-                                  {cell ? formatCount(sessions) : "—"}
+                                  {formatCount(sessions)}
                                 </td>
                               );
                             })}

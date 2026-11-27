@@ -356,13 +356,16 @@ function driverPctBarColor(pctAtOrAbove7: number | null): string {
 
 function Panel({
   label,
+  subtitle,
   children,
   className = "",
   panelRef,
   headerAction,
   exportAttr,
 }: {
-  label: string;
+  label?: string;
+  /** Optional period/tenure line under the title (same selected months). */
+  subtitle?: string;
   children: ReactNode;
   className?: string;
   panelRef?: RefObject<HTMLDivElement | null>;
@@ -370,21 +373,35 @@ function Panel({
   /** Sets data-export-{exportAttr} for PDF-only layout targeting. */
   exportAttr?: string;
 }) {
+  const showHeader = Boolean(label || subtitle || headerAction);
   return (
     <div
       ref={panelRef}
       {...(exportAttr ? ({ [`data-export-${exportAttr}`]: "true" } as Record<string, string>) : {})}
       className={`flex min-h-0 flex-col overflow-hidden rounded-md border border-sky-300/80 bg-white shadow-sm ${className}`}
     >
-      <div className="relative flex shrink-0 items-center justify-center px-3 pb-2 pt-2.5">
-        <p className="text-center text-[12px] font-semibold tracking-[0.08em] text-slate-800">
-          {label}
-        </p>
-        {headerAction ? (
-          <div className="absolute right-3 top-2.5 shrink-0">{headerAction}</div>
-        ) : null}
+      {showHeader ? (
+        <div className="relative flex shrink-0 flex-col items-center justify-center px-3 pb-2 pt-2.5">
+          {label ? (
+            <p className="text-center text-[12px] font-semibold tracking-[0.08em] text-slate-800">
+              {label}
+            </p>
+          ) : null}
+          {subtitle ? (
+            <p className="mt-0.5 text-center text-[10px] font-medium text-slate-500">
+              Period: {subtitle}
+            </p>
+          ) : null}
+          {headerAction ? (
+            <div className="absolute right-3 top-2.5 shrink-0">{headerAction}</div>
+          ) : null}
+        </div>
+      ) : null}
+      <div
+        className={`flex min-h-0 min-w-0 flex-1 flex-col px-3 pb-3 ${showHeader ? "pt-0" : "pt-3"}`}
+      >
+        {children}
       </div>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col px-3 pb-3 pt-0">{children}</div>
     </div>
   );
 }
@@ -597,7 +614,7 @@ type ZoneMeterItem = {
 
 type ZoneMeterMarker = { at: number; color: string; label?: string };
 
-const INSUFFICIENT_DATA_LABEL = "Not sufficient data";
+const INSUFFICIENT_DATA_LABEL = "insufficient data";
 
 function ZoneMeterBar({
   title,
@@ -1017,32 +1034,29 @@ export function WellbeingDashboard({
   );
 
   const categoryScores = useMemo(() => {
+    // Same as category table Total: Σ(avg × users) / Σ(users) across all selected months.
     const pick = (key: string) => {
-      const scores: number[] = [];
+      let scoreWeighted = 0;
       let usersWithData = 0;
       let usersAtOrAbove = 0;
-      let hasPct = false;
       for (const row of categoryRows) {
-        if (selectedMonth != null && (row.month !== selectedMonth || row.year !== year)) continue;
         const metric = row.categories[key];
         if (!metric) continue;
-        if (metric.avgScore != null) scores.push(metric.avgScore);
         const withData = metric.usersWithData || 0;
         usersWithData += withData;
+        if (metric.avgScore != null && withData > 0) {
+          scoreWeighted += metric.avgScore * withData;
+        }
         if (metric.usersAtOrAboveThreshold != null) {
           usersAtOrAbove += metric.usersAtOrAboveThreshold;
-          hasPct = true;
         } else if (metric.pctAtOrAboveThreshold != null && withData > 0) {
           usersAtOrAbove += (metric.pctAtOrAboveThreshold / 100) * withData;
-          hasPct = true;
         }
       }
       return {
-        score: avg(scores),
+        score: usersWithData > 0 ? Number((scoreWeighted / usersWithData).toFixed(1)) : null,
         pctAtOrAbove7:
-          hasPct && usersWithData > 0
-            ? Number(((usersAtOrAbove / usersWithData) * 100).toFixed(1))
-            : null,
+          usersWithData >= 10 ? Number(((usersAtOrAbove / usersWithData) * 100).toFixed(1)) : null,
       };
     };
     return {
@@ -1051,7 +1065,7 @@ export function WellbeingDashboard({
       belonging: pick("belonging"),
       energy: pick("energy"),
     };
-  }, [categoryRows, selectedMonth, year]);
+  }, [categoryRows]);
 
   /** Top Features uses selected months only, capped at the most recent 6. */
   const topFeatureMonths = useMemo(() => new Set(selectedMonths.slice(-6)), [selectedMonths]);
@@ -1526,7 +1540,7 @@ export function WellbeingDashboard({
 
             {/* Middle: Risks + Drivers share space evenly; Effectiveness matches Personalize height */}
             <div className="flex min-h-0 min-w-0 flex-col gap-3" data-export-mid-col>
-              <Panel label="RISKS" className="flex-1">
+              <Panel label="RISKS" subtitle={monthsTenure} className="flex-1">
                 <ZoneMeterGroup
                   pctCaption="% of Higher Risk users (score >7)"
                   avgMarkers={[
@@ -1568,7 +1582,7 @@ export function WellbeingDashboard({
                 />
               </Panel>
 
-              <Panel label="DRIVERS" className="flex-1">
+              <Panel label="DRIVERS" subtitle={monthsTenure} className="flex-1">
                 <ZoneMeterGroup
                   pctCaption="% of More Driven users (score >7)"
                   avgMarkers={[
@@ -1765,7 +1779,6 @@ export function WellbeingDashboard({
           {/* Bottom: Highlights — view by default; editor opens inline on Edit */}
           <div data-export-bottom-row>
             <Panel
-              label="Highlights"
               className="min-h-[7rem]"
               exportAttr="bottom-panel"
               headerAction={
