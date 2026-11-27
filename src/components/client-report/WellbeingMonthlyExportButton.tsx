@@ -4,21 +4,21 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui";
 import {
-  downloadEmotionalHealthExcel,
-  type EmotionalHealthExcelInput,
-} from "@/utils/emotionalHealthExcel";
+  downloadWellbeingMonthlyExcel,
+  type WellbeingMonthlyExcelInput,
+} from "@/utils/wellbeingMonthlyExcel";
 
-type EmotionalHealthExportButtonProps = {
+type WellbeingMonthlyExportButtonProps = {
   disabled?: boolean;
-  getPayload: () => EmotionalHealthExcelInput;
+  getPayload: () => WellbeingMonthlyExcelInput;
   onError?: (message: string) => void;
 };
 
-export function EmotionalHealthExportButton({
+export function WellbeingMonthlyExportButton({
   disabled = false,
   getPayload,
   onError,
-}: EmotionalHealthExportButtonProps) {
+}: WellbeingMonthlyExportButtonProps) {
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
@@ -35,7 +35,7 @@ export function EmotionalHealthExportButton({
     });
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     try {
-      await downloadEmotionalHealthExcel(getPayload());
+      await downloadWellbeingMonthlyExcel(getPayload());
     } catch (e) {
       onError?.(e instanceof Error ? e.message : "Failed to export Excel");
     } finally {
@@ -52,8 +52,8 @@ export function EmotionalHealthExportButton({
         className="!flex !h-9 !w-9 !min-w-9 !cursor-pointer !items-center !justify-center !border-transparent !bg-[#1f00a3] !p-0 !text-white shadow-md hover:!bg-[#16007a] focus:!ring-[#1f00a3] disabled:!cursor-wait"
         onClick={handleClick}
         disabled={disabled || exporting}
-        aria-label="Export emotional health Excel"
-        title="Export 10 indicators + 4 category indicators to Excel"
+        aria-label="Export wellbeing monthly metrics Excel"
+        title="Export Organization, tId, Month, Wellbeing Index to Excel"
       >
         {exporting ? (
           <svg
